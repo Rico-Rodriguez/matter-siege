@@ -1,0 +1,21 @@
+{
+  "name": "@matter-siege/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^8.15.0",
+    "@matter-siege/shared": "0.1.0",
+    "@matter-siege/sim": "0.1.0",
+    "@colyseus/sdk": "^0.17.43"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

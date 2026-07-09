@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a1113" />
+    <meta name="description" content="Matter Siege — craft elemental ammunition and collapse a rival tower in a cinematic browser physics duel." />
+    <title>Matter Siege</title>
+  </head>
+  <body data-phase="build">
+    <main id="game-shell">
+      <canvas id="renderCanvas" aria-label="Matter Siege battlefield"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+      <div class="film-grain" aria-hidden="true"></div>
+
+      <section id="splash" class="splash">
+        <div class="splash-rule"><span>THE ALCHEMISTS' DUEL</span></div>
+        <div class="splash-title" aria-label="Matter Siege">
+          <span class="title-matter">MATTER</span>
+          <span class="title-siege">SIEGE</span>
+        </div>
+        <p class="splash-deck">Forge the shot. Read the material. Bring down the core.</p>
+        <button id="enterButton" class="enter-button">
+          <span>Enter the workshop</span>
+          <small>LOCAL DUEL · NO DOWNLOAD</small>
+        </button>
+        <div class="splash-footer">
+          <span>WEBGPU / WEBGL2</span><i></i><span>RAPIER 2D AUTHORITY</span><i></i><span>BUILD 01</span>
+        </div>
+      </section>
+
+      <div id="hud" class="hud" aria-hidden="true">
+        <header class="topbar">
+          <div class="brand-lockup">
+            <span class="brand-mark">M//S</span>
+            <div><strong>MATTER SIEGE</strong><small>ALCHEMICAL ORDNANCE LAB</small></div>
+          </div>
+          <nav class="mode-switch" aria-label="Game mode">
+            <button class="mode active" data-mode="duel">Duel</button>
+            <button class="mode" data-mode="lab">The Lab</button>
+            <button class="mode" data-mode="online"><span class="online-dot"></span>Online</button>
+          </nav>
+          <div class="phase-readout">
+            <small id="phaseEyebrow">YOUR TURN · PHASE 01</small>
+            <strong id="phaseLabel">FORTIFY</strong>
+            <span id="turnLabel">TURN 01</span>
+          </div>
+          <div class="system-controls">
+            <span id="networkStatus" class="network-status">LOCAL</span>
+            <button id="soundButton" class="icon-button" aria-label="Toggle sound">SOUND ON</button>
+          </div>
+        </header>
+
+        <section class="core-meter core-left">
+          <div class="core-heading"><span>YOUR AETHER CORE</span><strong id="leftCoreText">100</strong></div>
+          <div class="meter-track"><i id="leftCoreBar"></i></div>
+          <small>STRUCTURAL FIELD // <b id="leftStatus">STABLE</b></small>
+        </section>
+
+        <section class="core-meter core-right">
+          <div class="core-heading"><span>RIVAL AETHER CORE</span><strong id="rightCoreText">100</strong></div>
+          <div class="meter-track"><i id="rightCoreBar"></i></div>
+          <small><b id="rightStatus">STABLE</b> // STRUCTURAL FIELD</small>
+        </section>
+
+        <aside class="phase-card">
+          <div class="card-index">0<span id="phaseNumber">1</span></div>
+          <div class="phase-copy">
+            <small id="phaseKicker">FORTIFY YOUR TOWER</small>
+            <h2 id="phaseTitle">Choose a treatment</h2>
+            <p id="phaseDescription">Select a treatment, then touch one of your tower blocks. Two actions are available.</p>
+          </div>
+
+          <div id="buildTools" class="build-tools">
+            <button class="treatment active" data-mutation="reinforce">
+              <span class="treatment-icon brace">╫</span><span><b>Brass brace</b><small>Repair + reinforce</small></span>
+            </button>
+            <button class="treatment" data-mutation="wet">
+              <span class="treatment-icon water">≋</span><span><b>Water veil</b><small>Resist flame</small></span>
+            </button>
+            <button class="treatment" data-mutation="frozen">
+              <span class="treatment-icon frost">✦</span><span><b>Flash chill</b><small>Hard but brittle</small></span>
+            </button>
+            <button class="treatment" data-mutation="oiled">
+              <span class="treatment-icon oil">◐</span><span><b>Oil coat</b><small>Slippery · volatile</small></span>
+            </button>
+            <div class="action-pips"><span>ACTIONS</span><i id="actionPip1"></i><i id="actionPip2"></i></div>
+          </div>
+
+          <div id="forgeTools" class="forge-tools">
+            <div class="forge-column">
+              <label>01 · BODY</label>
+              <div id="bodyChoices" class="choice-list"></div>
+            </div>
+            <div class="forge-column">
+              <label>02 · ELEMENT</label>
+              <div id="elementChoices" class="choice-list elemental"></div>
+            </div>
+            <div class="forge-column">
+              <label>03 · MODIFIER</label>
+              <div id="modifierChoices" class="choice-list"></div>
+            </div>
+          </div>
+
+          <button id="primaryAction" class="primary-action">
+            <span>OPEN THE FORGE</span><b>→</b>
+          </button>
+          <button id="quickLaunch" class="quick-launch">Use calibrated launch: 40° / 52%</button>
+        </aside>
+
+        <div id="aimPrompt" class="aim-prompt">
+          <div class="mouse-glyph"><i></i></div>
+          <div><strong>PULL BACK &amp; RELEASE</strong><small>Drag from the glowing launcher · the dots show the true arc</small></div>
+          <div class="aim-numbers"><b id="angleValue">40°</b><span id="powerValue">52%</span></div>
+        </div>
+
+        <div id="recipeChip" class="recipe-chip">
+          <span id="recipeGlyph">△</span>
+          <div><small>CHAMBERED RECIPE</small><b id="recipeName">STONE · FIRE · HEAVY</b></div>
+        </div>
+
+        <div id="enemyBanner" class="enemy-banner"><span></span><b>RIVAL ALCHEMIST AT WORK</b><span></span></div>
+        <div id="eventFeed" class="event-feed" aria-live="polite"></div>
+        <div id="toast" class="toast" role="status"></div>
+
+        <section id="winPanel" class="win-panel">
+          <small>MATCH RESOLVED</small>
+          <h2 id="winTitle">CORE COLLAPSED</h2>
+          <p id="winCopy">The rival lattice has failed.</p>
+          <button id="rematchButton">RECALIBRATE &amp; REMATCH</button>
+        </section>
+
+        <footer class="footer-telemetry">
+          <span id="rendererLabel">INITIALIZING GPU</span>
+          <span>SIM <b>30 HZ</b></span>
+          <span id="seedLabel">SEED —</span>
+          <span class="legend"><i class="fire-dot"></i> HEAT <i class="wet-dot"></i> WET <i class="charge-dot"></i> CHARGE</span>
+        </footer>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+

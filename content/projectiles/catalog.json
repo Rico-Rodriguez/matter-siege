@@ -1,0 +1,20 @@
+{
+  "bodies": [
+    { "id": "stone", "displayName": "Stone", "mass": 1.65, "radius": 0.34, "damageScale": 1.15, "color": "#a5a19a" },
+    { "id": "glass", "displayName": "Glass", "mass": 0.82, "radius": 0.3, "damageScale": 0.82, "color": "#b8f5f2" },
+    { "id": "metal", "displayName": "Copper", "mass": 2.05, "radius": 0.3, "damageScale": 1.28, "color": "#e28d55" }
+  ],
+  "elements": [
+    { "id": "fire", "displayName": "Fire", "color": "#ff7a35", "glyph": "△" },
+    { "id": "water", "displayName": "Water", "color": "#55c7e8", "glyph": "≋" },
+    { "id": "ice", "displayName": "Ice", "color": "#a7e8ff", "glyph": "✦" },
+    { "id": "acid", "displayName": "Acid", "color": "#a7e04b", "glyph": "◌" },
+    { "id": "lightning", "displayName": "Volt", "color": "#a985ff", "glyph": "ϟ" }
+  ],
+  "modifiers": [
+    { "id": "heavy", "displayName": "Heavy", "powerScale": 0.94, "damageScale": 1.38, "projectileCount": 1 },
+    { "id": "split", "displayName": "Split", "powerScale": 1.04, "damageScale": 0.68, "projectileCount": 3 },
+    { "id": "sticky", "displayName": "Sticky", "powerScale": 0.86, "damageScale": 0.9, "projectileCount": 1 }
+  ]
+}
+

@@ -1,0 +1,27 @@
+{
+  "name": "matter-siege",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-native 2.5D elemental physics dueling game.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build -w @matter-siege/shared && npm run build -w @matter-siege/sim && npm run dev -w @matter-siege/web",
+    "dev:server": "npm run build -w @matter-siege/shared && npm run build -w @matter-siege/sim && npm run dev -w @matter-siege/server",
+    "dev:all": "concurrently -k -n WEB,SERVER -c cyan,magenta \"npm run dev\" \"npm run dev:server\"",
+    "build": "npm run build -w @matter-siege/shared && npm run build -w @matter-siege/sim && npm run build -w @matter-siege/web && npm run build -w @matter-siege/server",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "test": "npm run build -w @matter-siege/shared && npm run build -w @matter-siege/sim && npm run test -w @matter-siege/sim && npm run test -w @matter-siege/server",
+    "verify": "npm run test && npm run typecheck && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
