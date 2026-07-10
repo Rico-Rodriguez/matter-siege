@@ -13,7 +13,6 @@ import { Hud, type GameMode } from "./Hud.js";
 import { NetworkSession } from "./NetworkSession.js";
 import { SceneWorld } from "./SceneWorld.js";
 
-const AIM_START_RADIUS = 1.8;
 const AIM_DEADZONE_PX = 16;
 const AIM_DEADZONE_WORLD = 0.18;
 const AIM_FULL_PULL_WORLD = 4.8;
@@ -39,6 +38,7 @@ export class GameController {
   private aimAngle = LAUNCH_CONFIG.recommendedAngle;
   private aimPower = LAUNCH_CONFIG.recommendedPower;
   private selectedMutation: MutationId = "reinforce";
+  private selectedBlockId: string | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -49,8 +49,9 @@ export class GameController {
       mode: (mode) => void this.startMode(mode),
       mutation: (mutation) => {
         this.selectedMutation = mutation;
-        this.audio.ui(480);
+        this.applySelectedMutation();
       },
+      guardian: () => this.upgradeGuardian(),
       recipe: () => this.audio.ui(610),
       primary: () => this.primaryAction(),
       rematch: () => void this.startMode(this.mode),
@@ -68,6 +69,7 @@ export class GameController {
     this.mode = mode;
     this.hud.setMode(mode);
     this.resetAimGesture();
+    this.clearBlockSelection();
     this.world.clearAim();
     this.world.setActiveLauncher(null);
     this.snapshot = undefined;
@@ -130,10 +132,17 @@ export class GameController {
   }
 
   private receiveSnapshot(snapshot: MatchSnapshot): void {
+    const previousPhase = this.snapshot?.phase;
     const wasLocalAim = this.isLocalAim(this.snapshot);
     this.snapshot = snapshot;
     this.world.sync(snapshot);
     this.hud.update(snapshot, this.localPlayer);
+    if (previousPhase && previousPhase !== snapshot.phase && snapshot.phase !== "build") this.clearBlockSelection();
+    if (this.selectedBlockId) {
+      const selected = snapshot.blocks.find((block) => block.id === this.selectedBlockId && block.owner === this.localPlayer && block.kind === "block");
+      if (selected) this.hud.selectBlock(selected);
+      else this.clearBlockSelection();
+    }
     const isLocalAim = this.isLocalAim(snapshot);
     this.world.setActiveLauncher(isLocalAim ? this.localPlayer : null);
     if (isLocalAim && !wasLocalAim) this.showRecommendedAim();
@@ -186,42 +195,77 @@ export class GameController {
     }
   }
 
+  private applySelectedMutation(): void {
+    const snapshot = this.snapshot;
+    if (!snapshot || snapshot.phase !== "build" || snapshot.activePlayer !== this.localPlayer) return;
+    if (!this.selectedBlockId) {
+      this.hud.showToast("Tap one of your tower blocks first");
+      return;
+    }
+    const block = snapshot.blocks.find((entry) => entry.id === this.selectedBlockId);
+    if (!block || block.owner !== this.localPlayer || block.kind !== "block") {
+      this.clearBlockSelection();
+      this.hud.showToast("Select an available block in your tower");
+      return;
+    }
+    if (this.command({ type: "mutate", blockId: block.id, mutation: this.selectedMutation })) this.audio.ui(360);
+  }
+
+  private upgradeGuardian(): void {
+    if (!this.snapshot || this.snapshot.phase !== "build" || this.snapshot.activePlayer !== this.localPlayer) return;
+    if (this.command({ type: "upgradeGuardian" })) {
+      this.audio.phase();
+      this.world.setSelectedBlock(`p${this.localPlayer}_core`);
+    }
+  }
+
+  private clearBlockSelection(): void {
+    this.selectedBlockId = null;
+    this.world.setSelectedBlock(null);
+    this.hud.selectBlock();
+  }
+
   private bindPointerControls(): void {
     this.canvas.addEventListener("pointerdown", (event) => {
-      if (!event.isPrimary || event.button !== 0 || this.aimPointerId !== null) return;
+      if (!event.isPrimary || (event.pointerType !== "touch" && event.button !== 0) || this.aimPointerId !== null) return;
       const snapshot = this.snapshot;
       if (!snapshot || snapshot.activePlayer !== this.localPlayer) return;
       if (snapshot.phase === "build") {
         const blockId = this.world.pickBlock(event.clientX, event.clientY);
         const block = snapshot.blocks.find((entry) => entry.id === blockId);
         if (!block || block.owner !== this.localPlayer) {
-          this.hud.showToast("Select a non-core block in your own tower");
+          this.hud.showToast("Tap one of the highlighted blocks in your tower");
           return;
         }
         if (block.kind === "core") {
-          this.hud.showToast("Aether cores reject direct treatment");
+          this.clearBlockSelection();
+          this.world.setSelectedBlock(block.id);
+          this.hud.showToast("Aether Regent selected · use Ascend Regent below");
           return;
         }
-        if (this.command({ type: "mutate", blockId: block.id, mutation: this.selectedMutation })) this.audio.ui(360);
+        this.selectedBlockId = block.id;
+        this.world.setSelectedBlock(block.id);
+        this.hud.selectBlock(block);
+        this.audio.ui(430);
         return;
       }
       if (snapshot.phase !== "aim") return;
       const point = this.world.screenToWorld(event.clientX, event.clientY);
       if (!point) return;
-      const launcher = this.world.getLauncher(this.localPlayer);
-      if (Math.hypot(point.x - launcher.x, point.y - launcher.y) > AIM_START_RADIUS) {
-        this.hud.showToast("Touch the pulsing launcher to begin");
-        return;
-      }
+      event.preventDefault();
       this.aimPointerId = event.pointerId;
       this.aimStartWorld = point;
       this.aimStartClient = { x: event.clientX, y: event.clientY };
       this.aimReady = false;
-      this.canvas.setPointerCapture(event.pointerId);
+      this.hud.setAimInteraction(true);
+      if (this.canvas.isConnected) this.canvas.setPointerCapture(event.pointerId);
     });
 
     this.canvas.addEventListener("pointermove", (event) => {
-      if (event.pointerId === this.aimPointerId) this.updateAim(event.clientX, event.clientY);
+      if (event.pointerId === this.aimPointerId) {
+        event.preventDefault();
+        this.updateAim(event.clientX, event.clientY);
+      }
     });
 
     const release = (event: PointerEvent): void => {
@@ -272,6 +316,7 @@ export class GameController {
     const pullDistance = Math.hypot(horizontalPull, verticalPull);
     const screenDistance = Math.hypot(clientX - startClient.x, clientY - startClient.y);
     this.aimReady = screenDistance >= AIM_DEADZONE_PX && pullDistance >= AIM_DEADZONE_WORLD;
+    this.hud.setAimInteraction(true, this.aimReady);
     if (!this.aimReady) return false;
 
     this.aimAngle = clamp((Math.atan2(verticalPull, horizontalPull) * 180) / Math.PI, LAUNCH_CONFIG.minAngle, LAUNCH_CONFIG.maxAngle);
@@ -292,6 +337,7 @@ export class GameController {
     this.aimAngle = LAUNCH_CONFIG.recommendedAngle;
     this.aimPower = LAUNCH_CONFIG.recommendedPower;
     this.aimReady = false;
+    this.hud.setAimInteraction(false);
     this.hud.setAim(this.aimAngle, this.aimPower);
     this.world.showAim(this.localPlayer, this.aimAngle, this.aimPower, snapshot.selectedRecipes[this.localPlayer]);
   }
@@ -302,6 +348,7 @@ export class GameController {
     this.aimStartWorld = undefined;
     this.aimStartClient = undefined;
     this.aimReady = false;
+    this.hud.setAimInteraction(false);
     if (releaseCapture && pointerId !== null && this.canvas.hasPointerCapture(pointerId)) this.canvas.releasePointerCapture(pointerId);
   }
 
@@ -319,6 +366,11 @@ export class GameController {
 
     if (snapshot.phase === "build") {
       if (snapshot.buildPoints > 0) {
+        const guardian = snapshot.blocks.find((block) => block.id === "p1_core");
+        if (guardian && guardian.upgradeLevel < 3 && snapshot.buildPoints === 2) {
+          this.simulation.applyCommand(1, { type: "upgradeGuardian" });
+          return;
+        }
         const candidates = snapshot.blocks.filter((block) => block.owner === 1 && block.kind === "block");
         const block = candidates[(snapshot.turn * 3 + snapshot.buildPoints * 5) % candidates.length];
         const mutations: MutationId[] = ["reinforce", "wet", "frozen", "reinforce"];

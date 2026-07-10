@@ -43,6 +43,29 @@ export interface MaterialDef {
   breakVfx: string;
 }
 
+export interface BlockUpgradeDef {
+  maxLevel: number;
+  hpBonusPerLevel: number;
+  repairPerLevel: number;
+}
+
+export interface GuardianTierDef {
+  level: number;
+  title: string;
+  maxHpBonus: number;
+  directDamageReduction: number;
+  repairPerTurn: number;
+  description: string;
+}
+
+export interface FortificationConfig {
+  block: BlockUpgradeDef;
+  guardian: {
+    floorMargin: number;
+    tiers: GuardianTierDef[];
+  };
+}
+
 export interface ProjectileBodyDef {
   id: ProjectileBodyId;
   displayName: string;
@@ -88,6 +111,7 @@ export interface BlockRuntimeState {
   size: Vec2;
   hp: number;
   maxHp: number;
+  upgradeLevel: number;
   temperature: number;
   wetness: number;
   charge: number;
@@ -131,11 +155,13 @@ export type SimEvent =
   | { type: "ignite"; tick: number; position: Vec2; blockId: string }
   | { type: "extinguish"; tick: number; position: Vec2; blockId: string }
   | { type: "arc"; tick: number; from: Vec2; to: Vec2 }
+  | { type: "guardianPulse"; tick: number; position: Vec2; guardianId: string; targetBlockId: string; amount: number }
   | { type: "phase"; tick: number; phase: MatchPhase; activePlayer: PlayerId }
   | { type: "win"; tick: number; winner: PlayerId };
 
 export type PlayerCommand =
   | { type: "mutate"; blockId: string; mutation: MutationId }
+  | { type: "upgradeGuardian" }
   | { type: "endBuild" }
   | { type: "craft"; recipe: ProjectileRecipe }
   | { type: "launch"; angle: number; power: number };

@@ -1,0 +1,36 @@
+{
+  "block": {
+    "maxLevel": 3,
+    "hpBonusPerLevel": 28,
+    "repairPerLevel": 38
+  },
+  "guardian": {
+    "floorMargin": 0.04,
+    "tiers": [
+      {
+        "level": 1,
+        "title": "Aether Regent",
+        "maxHpBonus": 0,
+        "directDamageReduction": 0,
+        "repairPerTurn": 0,
+        "description": "The living heart of your tower. Keep the Regent off the arena floor."
+      },
+      {
+        "level": 2,
+        "title": "Aegis Regent",
+        "maxHpBonus": 48,
+        "directDamageReduction": 0.15,
+        "repairPerTurn": 0,
+        "description": "Aether Aegis: +48 vitality and 15% less direct impact damage."
+      },
+      {
+        "level": 3,
+        "title": "Ascendant Regent",
+        "maxHpBonus": 42,
+        "directDamageReduction": 0.15,
+        "repairPerTurn": 10,
+        "description": "Mending Pulse: repairs the weakest allied block by 10 each turn."
+      }
+    ]
+  }
+}

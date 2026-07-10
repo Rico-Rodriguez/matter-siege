@@ -1,8 +1,11 @@
 import materialCatalog from "../../../content/materials/catalog.json" with { type: "json" };
 import projectileCatalog from "../../../content/projectiles/catalog.json" with { type: "json" };
+import upgradeCatalog from "../../../content/upgrades/catalog.json" with { type: "json" };
 import type {
   ElementDef,
   ElementId,
+  FortificationConfig,
+  GuardianTierDef,
   LaunchConfig,
   MaterialDef,
   MaterialId,
@@ -17,6 +20,7 @@ export const MATERIALS = materialCatalog as MaterialDef[];
 export const PROJECTILE_BODIES = projectileCatalog.bodies as ProjectileBodyDef[];
 export const ELEMENTS = projectileCatalog.elements as ElementDef[];
 export const MODIFIERS = projectileCatalog.modifiers as ModifierDef[];
+export const FORTIFICATION_CONFIG = upgradeCatalog as FortificationConfig;
 
 export const getMaterial = (id: MaterialId): MaterialDef => {
   const value = MATERIALS.find((entry) => entry.id === id);
@@ -39,6 +43,12 @@ export const getElement = (id: ElementId): ElementDef => {
 export const getModifier = (id: ModifierId): ModifierDef => {
   const value = MODIFIERS.find((entry) => entry.id === id);
   if (!value) throw new Error(`Unknown modifier: ${id}`);
+  return value;
+};
+
+export const getGuardianTier = (level: number): GuardianTierDef => {
+  const value = FORTIFICATION_CONFIG.guardian.tiers.find((entry) => entry.level === level);
+  if (!value) throw new Error(`Unknown guardian tier: ${level}`);
   return value;
 };
 
@@ -68,5 +78,23 @@ export function validateContent(): string[] {
   }
   if (MATERIALS.length < 8) errors.push("The launch catalog requires seven materials plus the core");
   if (ELEMENTS.length < 5) errors.push("The launch catalog requires five elements");
+  if (!Number.isInteger(FORTIFICATION_CONFIG.block.maxLevel) || FORTIFICATION_CONFIG.block.maxLevel < 2) {
+    errors.push("Block upgrades require at least two levels");
+  }
+  if (FORTIFICATION_CONFIG.block.hpBonusPerLevel <= 0 || FORTIFICATION_CONFIG.block.repairPerLevel <= 0) {
+    errors.push("Block upgrade HP and repair values must be positive");
+  }
+  const guardianLevels = FORTIFICATION_CONFIG.guardian.tiers.map((tier) => tier.level);
+  if (guardianLevels.length < 2 || guardianLevels.some((level, index) => level !== index + 1)) {
+    errors.push("Guardian tiers must be sequential and start at level one");
+  }
+  if (FORTIFICATION_CONFIG.guardian.floorMargin < 0) errors.push("Guardian floor margin cannot be negative");
+  for (const tier of FORTIFICATION_CONFIG.guardian.tiers) {
+    if (!tier.title || !tier.description) errors.push(`Guardian tier ${tier.level} requires readable copy`);
+    if (tier.maxHpBonus < 0 || tier.repairPerTurn < 0) errors.push(`Guardian tier ${tier.level} bonuses cannot be negative`);
+    if (tier.directDamageReduction < 0 || tier.directDamageReduction >= 1) {
+      errors.push(`Guardian tier ${tier.level} damage reduction must be between zero and one`);
+    }
+  }
   return errors;
 }

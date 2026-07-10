@@ -17,6 +17,8 @@ export function isPlayerCommand(value: unknown): value is PlayerCommand {
   switch (command.type) {
     case "endBuild":
       return true;
+    case "upgradeGuardian":
+      return Object.keys(command).length === 1;
     case "mutate":
       return typeof command.blockId === "string" && command.blockId.length < 80 && mutations.has(String(command.mutation));
     case "craft":
@@ -27,4 +29,3 @@ export function isPlayerCommand(value: unknown): value is PlayerCommand {
       return false;
   }
 }
-

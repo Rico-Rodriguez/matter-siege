@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LAUNCH_CONFIG, validateContent, type MatchSnapshot, type PlayerCommand, type PlayerId } from "@matter-siege/shared";
+import { FORTIFICATION_CONFIG, LAUNCH_CONFIG, validateContent, type MatchSnapshot, type PlayerCommand, type PlayerId } from "@matter-siege/shared";
 import { MatterSimulation, SIM_HZ, simulateReplay } from "../index.js";
 
 const towerIntegrity = (snapshot: MatchSnapshot, owner: PlayerId) =>
@@ -57,6 +57,73 @@ describe("MatterSimulation", () => {
       }).ok,
     ).toBe(true);
     expect(simulation.phase).toBe("aim");
+  });
+
+  it("upgrades one selected block through visible, capped levels", async () => {
+    const simulation = await MatterSimulation.create({ seed: 56, labMode: true });
+    const before = simulation.snapshot().blocks.find((block) => block.id === "p0_b0")!;
+
+    expect(simulation.applyCommand(0, { type: "mutate", blockId: before.id, mutation: "reinforce" }).ok).toBe(true);
+    expect(simulation.applyCommand(0, { type: "mutate", blockId: before.id, mutation: "reinforce" }).ok).toBe(true);
+    const upgraded = simulation.snapshot().blocks.find((block) => block.id === before.id)!;
+    expect(upgraded.upgradeLevel).toBe(FORTIFICATION_CONFIG.block.maxLevel);
+    expect(upgraded.maxHp).toBe(before.maxHp + FORTIFICATION_CONFIG.block.hpBonusPerLevel * 2);
+    expect(simulation.snapshot().buildPoints).toBe(0);
+
+    launchRecommendedShot(simulation, 0);
+    advanceThroughResolve(simulation);
+    const capped = simulation.applyCommand(0, { type: "mutate", blockId: before.id, mutation: "reinforce" });
+    expect(capped.ok).toBe(false);
+    expect(capped.error).toContain("maximum level");
+  });
+
+  it("places an upgradeable Aether Regent above the tower", async () => {
+    const simulation = await MatterSimulation.create({ seed: 57, labMode: true });
+    const initial = simulation.snapshot();
+    const guardian = initial.blocks.find((block) => block.id === "p0_core")!;
+    const highestBlock = Math.max(...initial.blocks.filter((block) => block.owner === 0 && block.kind === "block").map((block) => block.position.y));
+    expect(guardian.position.y).toBeGreaterThan(highestBlock);
+    expect(guardian.upgradeLevel).toBe(1);
+
+    expect(simulation.applyCommand(0, { type: "upgradeGuardian" }).ok).toBe(true);
+    expect(simulation.applyCommand(0, { type: "upgradeGuardian" }).ok).toBe(true);
+    const ascended = simulation.snapshot().blocks.find((block) => block.id === "p0_core")!;
+    expect(ascended.upgradeLevel).toBe(FORTIFICATION_CONFIG.guardian.tiers.length);
+    expect(ascended.maxHp).toBe(
+      guardian.maxHp + FORTIFICATION_CONFIG.guardian.tiers.slice(1).reduce((total, tier) => total + tier.maxHpBonus, 0),
+    );
+  });
+
+  it("defeats a tower when its Aether Regent touches the arena floor", async () => {
+    const simulation = await MatterSimulation.create({ seed: 58 });
+    const internals = simulation as unknown as {
+      blocks: Map<string, { body: { setTranslation(position: { x: number; y: number }, wakeUp: boolean): void } }>;
+    };
+    internals.blocks.get("p0_core")!.body.setTranslation({ x: -3, y: 0.45 }, true);
+    simulation.step();
+    expect(simulation.snapshot().winner).toBe(1);
+    expect(simulation.phase).toBe("finished");
+  });
+
+  it("uses the Ascendant Regent's deterministic mending pulse", async () => {
+    const simulation = await MatterSimulation.create({ seed: 59, labMode: true });
+    simulation.applyCommand(0, { type: "upgradeGuardian" });
+    simulation.applyCommand(0, { type: "upgradeGuardian" });
+    const internals = simulation as unknown as {
+      blocks: Map<string, { state: { hp: number; maxHp: number } }>;
+    };
+    const target = internals.blocks.get("p0_b0")!.state;
+    target.hp -= 25;
+    const damagedHp = target.hp;
+    simulation.drainEvents();
+
+    launchRecommendedShot(simulation, 0);
+    advanceThroughResolve(simulation);
+
+    expect(simulation.snapshot().blocks.find((block) => block.id === "p0_b0")!.hp).toBe(
+      damagedHp + FORTIFICATION_CONFIG.guardian.tiers.at(-1)!.repairPerTurn,
+    );
+    expect(simulation.drainEvents().some((event) => event.type === "guardianPulse" && event.targetBlockId === "p0_b0")).toBe(true);
   });
 
   it("produces the same snapshot from the same seed and command log", async () => {

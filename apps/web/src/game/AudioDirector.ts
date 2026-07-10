@@ -48,6 +48,8 @@ export class AudioDirector {
       this.tone(event.material === "metal" ? 210 : 72, 0.28, "triangle", 0.075, 42);
     } else if (event.type === "arc") {
       this.tone(720, 0.1, "square", 0.035, 180);
+    } else if (event.type === "guardianPulse") {
+      this.tone(360, 0.22, "sine", 0.045, 620);
     } else if (event.type === "win") {
       [220, 330, 440, 660].forEach((frequency, index) => window.setTimeout(() => this.tone(frequency, 0.5, "sine", 0.07, frequency * 1.04), index * 130));
     }
@@ -87,4 +89,3 @@ export class AudioDirector {
     source.start();
   }
 }
-

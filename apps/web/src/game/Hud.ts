@@ -1,9 +1,13 @@
 import {
   ELEMENTS,
+  FORTIFICATION_CONFIG,
   LAUNCH_CONFIG,
   MODIFIERS,
   PROJECTILE_BODIES,
   getElement,
+  getGuardianTier,
+  getMaterial,
+  type BlockRuntimeState,
   type MatchSnapshot,
   type MutationId,
   type PlayerId,
@@ -16,6 +20,7 @@ export type GameMode = "duel" | "lab" | "online";
 interface HudCallbacks {
   mode: (mode: GameMode) => void;
   mutation: (mutation: MutationId) => void;
+  guardian: () => void;
   recipe: (recipe: ProjectileRecipe) => void;
   primary: () => void;
   rematch: () => void;
@@ -32,6 +37,7 @@ export class Hud {
   recipe: ProjectileRecipe = { body: "stone", element: "fire", modifier: "heavy" };
   mutation: MutationId = "reinforce";
   private mode: GameMode = "duel";
+  private selectedBlockId: string | null = null;
   private toastTimer = 0;
   private readonly callbacks: HudCallbacks;
 
@@ -73,11 +79,11 @@ export class Hud {
     const phaseNames = { build: "FORTIFY", craft: "FORGE", aim: "TAKE AIM", resolve: "IMPACT", finished: "RESOLVED" } as const;
     const phaseNumbers = { build: "1", craft: "2", aim: "3", resolve: "4", finished: "5" } as const;
     const phaseCopy = {
-      build: ["STEP 1 · DEFEND", "Protect your tower", "Choose a treatment, then tap up to two non-core blocks in your tower. You may continue without using both actions."],
+      build: ["STEP 1 · FORTIFY", "Build your tower", "Tap a block to inspect it, then spend an action to upgrade or treat it. Your Aether Regent can ascend too."],
       craft: ["STEP 2 · BUILD YOUR SHOT", "Choose your projectile", "Pick one body, one element, and one flight modifier, then chamber the recipe."],
-      aim: ["STEP 3 · AIM AND FIRE", "Drag, then release", "Touch the pulsing launcher, drag down and away from the rival, then release. Or fire the recommended shot below."],
-      resolve: ["SHOT IN FLIGHT", "Watch the impact", "The next turn starts after the shot settles. Win by destroying the rival core or collapsing 70% of their tower."],
-      finished: ["MATCH COMPLETE", "Tower defeated", "A core was destroyed or too much of a tower collapsed. Review the result, then start a rematch."],
+      aim: ["STEP 3 · AIM AND FIRE", "Pull back, then release", "Drag down and back anywhere on the open battlefield, then release. Or fire the recommended shot below."],
+      resolve: ["SHOT IN FLIGHT", "Watch the impact", "Win by destroying the rival Regent, dropping them to the arena floor, or collapsing 70% of the tower."],
+      finished: ["MATCH COMPLETE", "Regent defeated", "An Aether Regent was destroyed, touched the arena floor, or lost too much of their tower."],
     } as const;
     const rivalPhaseCopy = {
       build: ["RIVAL TURN", "Rival is defending", "Your controls will return after the rival completes their shot."],
@@ -101,10 +107,13 @@ export class Hud {
 
     this.setCoreMeter("left", snapshot.coreHealth[0]);
     this.setCoreMeter("right", snapshot.coreHealth[1]);
-    required("#leftCoreLabel").textContent = `${localPlayer === 0 ? "YOUR" : "RIVAL"} AETHER CORE`;
-    required("#rightCoreLabel").textContent = `${localPlayer === 1 ? "YOUR" : "RIVAL"} AETHER CORE`;
+    const leftGuardian = snapshot.blocks.find((block) => block.id === "p0_core");
+    const rightGuardian = snapshot.blocks.find((block) => block.id === "p1_core");
+    required("#leftCoreLabel").textContent = `${localPlayer === 0 ? "YOUR" : "RIVAL"} ${leftGuardian ? getGuardianTier(leftGuardian.upgradeLevel).title : "Aether Regent"} · LV ${leftGuardian?.upgradeLevel ?? 1}`;
+    required("#rightCoreLabel").textContent = `${localPlayer === 1 ? "YOUR" : "RIVAL"} ${rightGuardian ? getGuardianTier(rightGuardian.upgradeLevel).title : "Aether Regent"} · LV ${rightGuardian?.upgradeLevel ?? 1}`;
     required("#actionPip1").classList.toggle("spent", snapshot.buildPoints < 1);
     required("#actionPip2").classList.toggle("spent", snapshot.buildPoints < 2);
+    required("#actionCount").textContent = `${snapshot.buildPoints} / 2 ACTIONS`;
     required("#enemyBanner").classList.toggle("visible", !isMine && snapshot.phase !== "finished");
 
     const primary = required<HTMLButtonElement>("#primaryAction");
@@ -125,12 +134,47 @@ export class Hud {
     aimPrompt.style.display = showAimHelp ? "" : "none";
     aimPrompt.setAttribute("aria-hidden", String(!showAimHelp));
 
+    const guardian = snapshot.blocks.find((block) => block.id === `p${localPlayer}_core`);
+    if (guardian) this.updateGuardian(guardian, snapshot.buildPoints, isMine && snapshot.phase === "build");
+    if (this.selectedBlockId) {
+      const selected = snapshot.blocks.find((block) => block.id === this.selectedBlockId && block.owner === localPlayer && block.kind === "block");
+      this.selectBlock(selected);
+    }
+
     if (snapshot.phase === "finished") this.showWinner(snapshot.winner, localPlayer);
   }
 
   setAim(angle: number, power: number): void {
     required("#angleValue").textContent = `${Math.round(angle)}°`;
     required("#powerValue").textContent = `${Math.round(power * 100)}%`;
+  }
+
+  setAimInteraction(active: boolean, ready = false): void {
+    document.body.dataset.aimGesture = ready ? "ready" : active ? "pulling" : "idle";
+    required("#aimInstruction").textContent = ready ? "RELEASE TO FIRE" : active ? "PULL DOWN AND BACK" : "DRAG · RELEASE TO FIRE";
+  }
+
+  selectBlock(block?: BlockRuntimeState): void {
+    this.selectedBlockId = block?.id ?? null;
+    const inspector = required("#blockInspector");
+    const hint = required("#selectionHint");
+    inspector.hidden = !block;
+    hint.hidden = Boolean(block);
+    if (!block) {
+      required("#blockUpgradeCopy").textContent = "Select a block first";
+      return;
+    }
+    const material = getMaterial(block.material);
+    const health = Math.max(0, block.hp / block.maxHp);
+    required("#selectedBlockName").textContent = material.displayName.toUpperCase();
+    required("#selectedBlockLevel").textContent = `LV ${block.upgradeLevel}`;
+    required("#selectedBlockHealth").textContent = `${Math.ceil(block.hp)} / ${Math.ceil(block.maxHp)} HP`;
+    required<HTMLElement>("#selectedBlockHealthBar").style.width = `${health * 100}%`;
+    const atMaximum = block.upgradeLevel >= FORTIFICATION_CONFIG.block.maxLevel;
+    required("#selectedBlockState").textContent = atMaximum ? "MAX LEVEL" : `UPGRADE AVAILABLE · +${FORTIFICATION_CONFIG.block.hpBonusPerLevel} MAX HP`;
+    required("#blockUpgradeCopy").textContent = atMaximum
+      ? "Maximum level reached"
+      : `LV ${block.upgradeLevel + 1} · +${FORTIFICATION_CONFIG.block.hpBonusPerLevel} HP · 1 action`;
   }
 
   showToast(message: string): void {
@@ -156,6 +200,9 @@ export class Hud {
       } else if (event.type === "arc") {
         line.classList.add("volt");
         line.textContent = "CONDUCTIVE ARC";
+      } else if (event.type === "guardianPulse") {
+        line.classList.add("cold");
+        line.textContent = `REGENT MENDS +${Math.round(event.amount)} HP`;
       } else {
         line.textContent = event.type === "ignite" ? "COMBUSTION STARTED" : "STEAM QUENCH";
       }
@@ -172,6 +219,7 @@ export class Hud {
       document.querySelectorAll(".treatment").forEach((entry) => entry.classList.toggle("active", entry === button));
       this.callbacks.mutation(this.mutation);
     }));
+    required("#guardianUpgrade").addEventListener("click", this.callbacks.guardian);
     required("#primaryAction").addEventListener("click", this.callbacks.primary);
     required("#rematchButton").addEventListener("click", this.callbacks.rematch);
     required("#soundButton").addEventListener("click", () => {
@@ -219,6 +267,17 @@ export class Hud {
     required(`#${side}CoreText`).textContent = String(Math.max(0, value));
     required<HTMLElement>(`#${side}CoreBar`).style.width = `${Math.max(0, value)}%`;
     required(`#${side}Status`).textContent = value > 65 ? "STABLE" : value > 30 ? "COMPROMISED" : "CRITICAL";
+  }
+
+  private updateGuardian(guardian: BlockRuntimeState, buildPoints: number, canAct: boolean): void {
+    const tier = getGuardianTier(guardian.upgradeLevel);
+    const nextTier = guardian.upgradeLevel < FORTIFICATION_CONFIG.guardian.tiers.length
+      ? getGuardianTier(guardian.upgradeLevel + 1)
+      : null;
+    required("#guardianLevel").textContent = `${tier.title.toUpperCase()} · LV ${guardian.upgradeLevel}`;
+    required("#guardianUpgradeTitle").textContent = nextTier ? `ASCEND TO ${nextTier.title.toUpperCase()}` : "FULLY ASCENDED";
+    required("#guardianUpgradeCopy").textContent = nextTier ? `${nextTier.description} · 1 action` : tier.description;
+    required<HTMLButtonElement>("#guardianUpgrade").disabled = !canAct || buildPoints <= 0 || !nextTier;
   }
 
   private showWinner(winner: PlayerId | null, localPlayer: PlayerId): void {

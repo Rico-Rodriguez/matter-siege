@@ -44,7 +44,10 @@ interface VisualBlock {
   root: TransformNode;
   meshes: Mesh[];
   material: PBRMaterial;
-  braceAdded: boolean;
+  selectionFrame: Mesh;
+  upgradeLevel: number;
+  guardianOrb?: Mesh;
+  guardianRing?: Mesh;
 }
 
 interface VisualProjectile {
@@ -96,6 +99,7 @@ export class SceneWorld {
   private aimMaterial!: StandardMaterial;
   private frameCallback: (deltaSeconds: number) => void = () => undefined;
   private activeLauncher: PlayerId | null = null;
+  private selectedBlockId: string | null = null;
   private shake = 0;
   private elapsed = 0;
 
@@ -187,6 +191,11 @@ export class SceneWorld {
     }
   }
 
+  setSelectedBlock(blockId: string | null): void {
+    this.selectedBlockId = blockId;
+    for (const [id, visual] of this.blocks) visual.selectionFrame.isVisible = id === blockId;
+  }
+
   sync(snapshot: MatchSnapshot): void {
     const activeBlockIds = new Set(snapshot.blocks.map((block) => block.id));
     for (const block of snapshot.blocks) this.syncBlock(block);
@@ -223,6 +232,8 @@ export class SceneWorld {
       } else if (event.type === "extinguish") {
         this.stopBurning(event.blockId);
         this.steam(event.position.x, event.position.y);
+      } else if (event.type === "guardianPulse") {
+        this.burst(event.position.x, event.position.y, "water", 26);
       } else if (event.type === "win") {
         this.shake = 0.48;
       }
@@ -235,8 +246,10 @@ export class SceneWorld {
 
   screenToWorld(clientX: number, clientY: number): { x: number; y: number } | null {
     const rect = this.canvas.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * this.engine.getRenderWidth();
-    const y = ((clientY - rect.top) / rect.height) * this.engine.getRenderHeight();
+    // Babylon applies hardware scaling internally. Passing render-buffer pixels here
+    // scales high-DPR mobile coordinates twice and makes visible targets unpickable.
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
     const ray = this.scene.createPickingRay(x, y, Matrix.Identity(), this.camera, false);
     const hitDistance = ray.intersectsPlane(new Plane(0, 0, 1, 0));
     if (hitDistance === null) return null;
@@ -246,10 +259,18 @@ export class SceneWorld {
 
   pickBlock(clientX: number, clientY: number): string | null {
     const rect = this.canvas.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * this.engine.getRenderWidth();
-    const y = ((clientY - rect.top) / rect.height) * this.engine.getRenderHeight();
-    const result = this.scene.pick(x, y, (mesh) => typeof mesh.metadata?.blockId === "string", false, this.camera);
-    return result?.pickedMesh?.metadata?.blockId ?? null;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const offsets = [
+      [0, 0], [-14, 0], [14, 0], [0, -14], [0, 14],
+      [-24, -18], [24, -18], [-24, 18], [24, 18],
+    ] as const;
+    for (const [offsetX, offsetY] of offsets) {
+      const result = this.scene.pick(x + offsetX, y + offsetY, (mesh) => typeof mesh.metadata?.blockId === "string", false, this.camera);
+      const blockId = result?.pickedMesh?.metadata?.blockId;
+      if (typeof blockId === "string") return blockId;
+    }
+    return null;
   }
 
   showAim(player: PlayerId, angle: number, power: number, recipe: ProjectileRecipe): void {
@@ -287,7 +308,7 @@ export class SceneWorld {
     const key = new DirectionalLight("warmKey", new Vector3(-0.42, -0.8, 0.45), this.scene);
     key.position = new Vector3(5, 13, -9);
     key.diffuse = new Color3(1, 0.74, 0.48);
-    key.intensity = 2.6;
+    key.intensity = 1.7;
     this.shadow = new ShadowGenerator(2048, key);
     this.shadow.useBlurExponentialShadowMap = true;
     this.shadow.blurKernel = 24;
@@ -299,8 +320,8 @@ export class SceneWorld {
     for (const side of [-1, 1]) {
       const towerFill = new PointLight(`towerFill_${side}`, new Vector3(side * 8, 5.8, -6), this.scene);
       towerFill.diffuse = side < 0 ? new Color3(0.5, 0.82, 0.75) : new Color3(1, 0.62, 0.38);
-      towerFill.intensity = 72;
-      towerFill.range = 13;
+      towerFill.intensity = side < 0 ? 8 : 16;
+      towerFill.range = 11;
     }
   }
 
@@ -550,9 +571,9 @@ export class SceneWorld {
     visual.root.rotation.z = state.rotation;
     const material = visual.material;
     const base = getMaterial(state.material);
-    material.albedoColor = hex(base.color);
+    material.albedoColor = hex(base.color).scale(1.12);
     material.roughness = state.wetness > 0.2 || state.oiled ? 0.16 : base.roughness;
-    let emissive = hex(base.color).scale(state.material === "glass" || state.material === "ice" ? 0.055 : 0.025);
+    let emissive = hex(base.color).scale(state.material === "glass" || state.material === "ice" ? 0.16 : 0.12);
     if (state.burning) emissive = new Color3(0.8, 0.11, 0.015);
     else if (state.charge > 0.08) emissive = new Color3(0.22, 0.12, 0.65).scale(Math.min(1, state.charge));
     else if (state.frozen) emissive = new Color3(0.06, 0.33, 0.55);
@@ -562,10 +583,11 @@ export class SceneWorld {
 
     if (state.burning && !this.burning.has(state.id)) this.startBurning(state.id, visual.root);
     if (!state.burning && this.burning.has(state.id)) this.stopBurning(state.id);
-    if (state.reinforced && !visual.braceAdded) {
-      this.addBrace(visual, state);
-      visual.braceAdded = true;
+    while (visual.upgradeLevel < state.upgradeLevel) {
+      visual.upgradeLevel += 1;
+      this.addUpgradeTier(visual, state, visual.upgradeLevel);
     }
+    visual.selectionFrame.isVisible = state.id === this.selectedBlockId;
     const fire = this.burning.get(state.id);
     if (fire) fire.emitter = new Vector3(state.position.x, state.position.y + 0.28, -0.5);
     const light = this.coreLights.get(state.id);
@@ -582,56 +604,174 @@ export class SceneWorld {
     const base = this.materials.get(state.material)!;
     const material = base.clone(`blockMaterial_${state.id}`) as PBRMaterial;
     const meshes: Mesh[] = [];
+    let guardianOrb: Mesh | undefined;
+    let guardianRing: Mesh | undefined;
     if (state.kind === "core") {
-      const cage = MeshBuilder.CreateBox(`coreCage_${state.id}`, { width: state.size.x, height: state.size.y, depth: 1.48 }, this.scene);
-      cage.parent = root;
-      cage.material = material;
-      cage.visibility = 0.64;
-      cage.enableEdgesRendering();
-      cage.edgesWidth = 2;
-      cage.edgesColor = new Color4(0.93, 0.68, 0.24, 0.8);
-      const crystal = MeshBuilder.CreatePolyhedron(`coreCrystal_${state.id}`, { type: 1, size: 0.48 }, this.scene);
-      crystal.parent = root;
-      crystal.position.z = -0.48;
-      crystal.material = material;
-      meshes.push(cage, crystal);
+      const regentBodyMaterial = new PBRMaterial(`regentBody_${state.id}`, this.scene);
+      regentBodyMaterial.albedoColor = new Color3(0.18, 0.085, 0.025);
+      regentBodyMaterial.emissiveColor = new Color3(0.08, 0.025, 0.006);
+      regentBodyMaterial.metallic = 0.68;
+      regentBodyMaterial.roughness = 0.38;
+      const pedestal = MeshBuilder.CreateCylinder(`regentPedestal_${state.id}`, { height: 0.18, diameter: 1.08, tessellation: 12 }, this.scene);
+      pedestal.parent = root;
+      pedestal.position.y = -0.37;
+      pedestal.material = regentBodyMaterial;
+      const robe = MeshBuilder.CreateCylinder(`regentRobe_${state.id}`, { height: 0.62, diameterTop: 0.38, diameterBottom: 0.78, tessellation: 8 }, this.scene);
+      robe.parent = root;
+      robe.position.y = 0.01;
+      robe.material = regentBodyMaterial;
+      const head = MeshBuilder.CreateSphere(`regentHead_${state.id}`, { diameter: 0.27, segments: 12 }, this.scene);
+      head.parent = root;
+      head.position.set(0, 0.42, -0.08);
+      head.material = material;
+      const crown = MeshBuilder.CreateCylinder(`regentCrown_${state.id}`, { height: 0.2, diameterTop: 0.48, diameterBottom: 0.28, tessellation: 6 }, this.scene);
+      crown.parent = root;
+      crown.position.y = 0.59;
+      crown.material = material;
+      guardianOrb = MeshBuilder.CreatePolyhedron(`regentOrb_${state.id}`, { type: 1, size: 0.21 }, this.scene);
+      guardianOrb.parent = root;
+      guardianOrb.position.set(0, 0.17, -0.51);
+      guardianOrb.material = material;
+      guardianRing = MeshBuilder.CreateTorus(`regentHalo_${state.id}`, { diameter: 0.93, thickness: 0.035, tessellation: 36 }, this.scene);
+      guardianRing.parent = root;
+      guardianRing.position.y = 0.22;
+      guardianRing.rotation.x = Math.PI / 2;
+      guardianRing.material = material;
+      meshes.push(pedestal, robe, head, crown, guardianOrb, guardianRing);
       const light = new PointLight(`coreLight_${state.id}`, new Vector3(state.position.x, state.position.y, -0.8), this.scene);
       light.diffuse = new Color3(1, 0.48, 0.12);
-      light.intensity = 6;
+      light.intensity = 4.5;
       light.range = 4.2;
       this.coreLights.set(state.id, light);
     } else {
       const mesh = MeshBuilder.CreateBox(`block_${state.id}`, { width: state.size.x, height: state.size.y, depth: 1.5 }, this.scene);
       mesh.parent = root;
       mesh.material = material;
-      mesh.enableEdgesRendering();
-      mesh.edgesWidth = state.material === "glass" || state.material === "ice" ? 1.3 : 0.9;
-      mesh.edgesColor = state.owner === 0
-        ? new Color4(0.3, 0.78, 0.7, 0.78)
-        : new Color4(0.92, 0.49, 0.31, 0.78);
       this.glow.addExcludedMesh(mesh);
       meshes.push(mesh);
+      this.addMaterialDetails(state, root, meshes);
     }
+    const selectionMaterial = new StandardMaterial(`selection_${state.id}`, this.scene);
+    selectionMaterial.disableLighting = true;
+    selectionMaterial.emissiveColor = new Color3(0.95, 0.69, 0.25);
+    selectionMaterial.alpha = 0.86;
+    selectionMaterial.wireframe = true;
+    const selectionFrame = MeshBuilder.CreateBox(
+      `selectionFrame_${state.id}`,
+      { width: state.size.x + 0.16, height: state.size.y + 0.16, depth: 1.66 },
+      this.scene,
+    );
+    selectionFrame.parent = root;
+    selectionFrame.material = selectionMaterial;
+    selectionFrame.isPickable = false;
+    selectionFrame.isVisible = state.id === this.selectedBlockId;
     for (const mesh of meshes) {
       mesh.metadata = { blockId: state.id };
       this.shadow.addShadowCaster(mesh);
     }
-    return { root, meshes, material, braceAdded: false };
+    const visual = { root, meshes, material, selectionFrame, upgradeLevel: 1, guardianOrb, guardianRing };
+    while (visual.upgradeLevel < state.upgradeLevel) {
+      visual.upgradeLevel += 1;
+      this.addUpgradeTier(visual, state, visual.upgradeLevel);
+    }
+    return visual;
   }
 
-  private addBrace(visual: VisualBlock, state: BlockRuntimeState): void {
-    const braceMaterial = new PBRMaterial(`brace_${state.id}`, this.scene);
+  private addMaterialDetails(state: BlockRuntimeState, root: TransformNode, meshes: Mesh[]): void {
+    const definition = getMaterial(state.material);
+    const faceMaterial = new StandardMaterial(`face_${state.id}`, this.scene);
+    faceMaterial.diffuseColor = hex(definition.color).scale(0.62);
+    faceMaterial.emissiveColor = hex(definition.color).scale(0.13);
+    faceMaterial.specularColor = state.material === "metal" ? new Color3(0.42, 0.3, 0.18) : Color3.Black();
+    if (state.material === "glass" || state.material === "ice") faceMaterial.alpha = 0.72;
+    const face = MeshBuilder.CreateBox(
+      `facePanel_${state.id}`,
+      { width: state.size.x * 0.88, height: state.size.y * 0.78, depth: 0.045 },
+      this.scene,
+    );
+    face.parent = root;
+    face.position.z = -0.78;
+    face.material = faceMaterial;
+    meshes.push(face);
+    const detail = new StandardMaterial(`detail_${state.id}`, this.scene);
+    detail.diffuseColor = hex(definition.color).scale(state.material === "glass" || state.material === "ice" ? 0.5 : 0.26);
+    detail.emissiveColor = detail.diffuseColor.scale(0.35);
+    detail.specularColor = state.material === "metal" ? new Color3(0.65, 0.48, 0.28) : Color3.Black();
+    const addBar = (name: string, width: number, height: number, x: number, y: number): void => {
+      const bar = MeshBuilder.CreateBox(`${name}_${state.id}`, { width, height, depth: 0.055 }, this.scene);
+      bar.parent = root;
+      bar.position.set(x, y, -0.835);
+      bar.material = detail;
+      meshes.push(bar);
+    };
+    if (state.material === "hay") {
+      addBar("twineA", 0.055, state.size.y * 0.92, -0.25, 0);
+      addBar("twineB", 0.055, state.size.y * 0.92, 0.25, 0);
+    } else if (state.material === "wood") {
+      addBar("timberCapA", 0.1, state.size.y * 0.94, -0.43, 0);
+      addBar("timberCapB", 0.1, state.size.y * 0.94, 0.43, 0);
+    } else if (state.material === "clay") {
+      addBar("brickSeam", state.size.x * 0.94, 0.035, 0, 0);
+      addBar("brickJointA", 0.035, state.size.y * 0.44, -0.18, -0.17);
+      addBar("brickJointB", 0.035, state.size.y * 0.44, 0.22, 0.17);
+    } else if (state.material === "glass" || state.material === "ice") {
+      addBar("paneTop", state.size.x, 0.065, 0, state.size.y * 0.43);
+      addBar("paneBottom", state.size.x, 0.065, 0, -state.size.y * 0.43);
+      addBar("paneLeft", 0.065, state.size.y, -state.size.x * 0.45, 0);
+      addBar("paneRight", 0.065, state.size.y, state.size.x * 0.45, 0);
+    } else if (state.material === "metal") {
+      addBar("metalBand", 0.12, state.size.y, 0, 0);
+      for (const x of [-0.38, 0.38]) for (const y of [-0.22, 0.22]) {
+        const rivet = MeshBuilder.CreateSphere(`rivet_${state.id}_${x}_${y}`, { diameter: 0.075, segments: 6 }, this.scene);
+        rivet.parent = root;
+        rivet.position.set(x, y, -0.82);
+        rivet.material = detail;
+        meshes.push(rivet);
+      }
+    } else if (state.material === "stone") {
+      addBar("stoneCourseTop", state.size.x * 0.72, 0.035, 0.08, 0.18);
+      addBar("stoneCourseBottom", state.size.x * 0.64, 0.035, -0.12, -0.18);
+    }
+  }
+
+  private addUpgradeTier(visual: VisualBlock, state: BlockRuntimeState, level: number): void {
+    const braceMaterial = new PBRMaterial(`brace_${state.id}_${level}`, this.scene);
     braceMaterial.albedoColor = new Color3(0.62, 0.4, 0.14);
     braceMaterial.metallic = 0.92;
     braceMaterial.roughness = 0.27;
-    for (const direction of [-1, 1]) {
-      const bar = MeshBuilder.CreateBox(`braceBar_${state.id}_${direction}`, { width: state.size.x * 0.9, height: 0.055, depth: 0.055 }, this.scene);
+    if (state.kind === "core") {
+      const ring = MeshBuilder.CreateTorus(`regentTier_${state.id}_${level}`, { diameter: level === 2 ? 1.12 : 1.36, thickness: level === 2 ? 0.055 : 0.07, tessellation: 32 }, this.scene);
+      ring.parent = visual.root;
+      ring.position.y = level === 2 ? 0.18 : 0.28;
+      ring.rotation.x = Math.PI / 2;
+      ring.material = braceMaterial;
+      ring.metadata = { blockId: state.id };
+      visual.meshes.push(ring);
+      return;
+    }
+    if (level === 2) for (const direction of [-1, 1]) {
+      const bar = MeshBuilder.CreateBox(`braceBar_${state.id}_${direction}`, { width: state.size.x * 0.94, height: 0.09, depth: 0.09 }, this.scene);
       bar.parent = visual.root;
-      bar.position.z = -0.79;
+      bar.position.z = -0.81;
       bar.rotation.z = direction * 0.48;
       bar.material = braceMaterial;
       bar.metadata = { blockId: state.id };
       visual.meshes.push(bar);
+    } else if (level === 3) {
+      for (const x of [-0.45, 0.45]) for (const y of [-0.27, 0.27]) {
+        const cap = MeshBuilder.CreateBox(`tierCap_${state.id}_${x}_${y}`, { width: 0.16, height: 0.16, depth: 0.12 }, this.scene);
+        cap.parent = visual.root;
+        cap.position.set(x, y, -0.83);
+        cap.material = braceMaterial;
+        cap.metadata = { blockId: state.id };
+        visual.meshes.push(cap);
+      }
+      const crest = MeshBuilder.CreatePolyhedron(`tierCrest_${state.id}`, { type: 1, size: 0.13 }, this.scene);
+      crest.parent = visual.root;
+      crest.position.set(0, 0, -0.87);
+      crest.material = braceMaterial;
+      crest.metadata = { blockId: state.id };
+      visual.meshes.push(crest);
     }
   }
 
@@ -786,15 +926,14 @@ export class SceneWorld {
       visual.ring.scaling.setAll(pulse);
       visual.pointer.position.y = LAUNCH_CONFIG.height + 1.05 + (active ? Math.sin(this.elapsed * 4.2) * 0.1 : 0);
     }
-    for (const [id, visual] of this.blocks) {
-      if (id.includes("core")) {
-        const crystal = visual.meshes[1];
-        if (crystal) {
-          crystal.rotation.y += delta * 1.15;
-          crystal.rotation.x = Math.sin(this.elapsed * 1.4) * 0.18;
-          crystal.scaling.setAll(1 + Math.sin(this.elapsed * 3.2) * 0.035);
-        }
+    for (const visual of this.blocks.values()) {
+      if (visual.guardianOrb) {
+        visual.guardianOrb.rotation.y += delta * 1.45;
+        visual.guardianOrb.rotation.x = Math.sin(this.elapsed * 1.4) * 0.18;
+        visual.guardianOrb.scaling.setAll(1 + Math.sin(this.elapsed * 3.2) * 0.055);
       }
+      if (visual.guardianRing) visual.guardianRing.rotation.z += delta * 0.42;
+      if (visual.selectionFrame.isVisible) visual.selectionFrame.scaling.setAll(1 + Math.sin(this.elapsed * 5.2) * 0.025);
     }
     for (const visual of this.projectiles.values()) {
       const ring = visual.meshes[1];

@@ -19,7 +19,7 @@
           <span class="title-matter">MATTER</span>
           <span class="title-siege">SIEGE</span>
         </div>
-        <p class="splash-deck">Defend your tower. Forge a shot. Destroy the rival core—or collapse 70% of its structure.</p>
+        <p class="splash-deck">Fortify your tower. Forge a shot. Destroy the rival Regent—or knock them to the arena floor.</p>
         <button id="enterButton" class="enter-button">
           <span>Enter the workshop</span>
           <small>LOCAL DUEL · NO DOWNLOAD</small>
@@ -52,13 +52,13 @@
         </header>
 
         <section class="core-meter core-left">
-          <div class="core-heading"><span id="leftCoreLabel">YOUR AETHER CORE</span><strong id="leftCoreText">100</strong></div>
+          <div class="core-heading"><span id="leftCoreLabel">YOUR AETHER REGENT</span><strong id="leftCoreText">100</strong></div>
           <div class="meter-track"><i id="leftCoreBar"></i></div>
           <small>CORE LATTICE // <b id="leftStatus">STABLE</b></small>
         </section>
 
         <section class="core-meter core-right">
-          <div class="core-heading"><span id="rightCoreLabel">RIVAL AETHER CORE</span><strong id="rightCoreText">100</strong></div>
+          <div class="core-heading"><span id="rightCoreLabel">RIVAL AETHER REGENT</span><strong id="rightCoreText">100</strong></div>
           <div class="meter-track"><i id="rightCoreBar"></i></div>
           <small><b id="rightStatus">STABLE</b> // CORE LATTICE</small>
         </section>
@@ -72,8 +72,19 @@
           </div>
 
           <div id="buildTools" class="build-tools">
+            <div id="selectionHint" class="selection-hint">
+              <span>1</span><div><b>Tap one of your blocks</b><small>Inspect it first, then choose an upgrade or treatment.</small></div>
+            </div>
+            <div id="blockInspector" class="block-inspector" hidden>
+              <div class="inspector-heading">
+                <div><small>SELECTED BLOCK</small><b id="selectedBlockName">MOONSTONE</b></div>
+                <strong id="selectedBlockLevel">LV 1</strong>
+              </div>
+              <div class="block-health"><i id="selectedBlockHealthBar"></i></div>
+              <div class="inspector-meta"><span id="selectedBlockHealth">132 / 132 HP</span><span id="selectedBlockState">READY TO UPGRADE</span></div>
+            </div>
             <button class="treatment active" data-mutation="reinforce">
-              <span class="treatment-icon brace">╫</span><span><b>Brass brace</b><small>Repair + reinforce</small></span>
+              <span class="treatment-icon brace">╫</span><span><b>Upgrade block</b><small id="blockUpgradeCopy">Select a block first</small></span>
             </button>
             <button class="treatment" data-mutation="wet">
               <span class="treatment-icon water">≋</span><span><b>Water veil</b><small>Extinguish + resist ignition</small></span>
@@ -84,7 +95,12 @@
             <button class="treatment" data-mutation="oiled">
               <span class="treatment-icon oil">◐</span><span><b>Oil coat</b><small>Burns faster when ignited</small></span>
             </button>
-            <div class="action-pips"><span>ACTIONS</span><i id="actionPip1"></i><i id="actionPip2"></i></div>
+            <button id="guardianUpgrade" class="guardian-upgrade">
+              <span class="guardian-sigil">✦</span>
+              <span><small id="guardianLevel">AETHER REGENT · LV 1</small><b id="guardianUpgradeTitle">ASCEND YOUR REGENT</b><em id="guardianUpgradeCopy">Unlock Aether Aegis · 1 action</em></span>
+              <strong>+</strong>
+            </button>
+            <div class="action-pips"><span id="actionCount">2 / 2 ACTIONS</span><i id="actionPip1"></i><i id="actionPip2"></i></div>
           </div>
 
           <div id="forgeTools" class="forge-tools">
@@ -109,7 +125,7 @@
 
         <div id="aimPrompt" class="aim-prompt" aria-hidden="true" hidden>
           <div class="gesture-glyph" aria-hidden="true"><i></i></div>
-          <div><strong>TOUCH · DRAG · RELEASE</strong><small>Start at the pulsing launcher, then drag down and away from the rival</small></div>
+          <div><strong id="aimInstruction">DRAG · RELEASE TO FIRE</strong><small>Pull down and back anywhere on the open battlefield</small></div>
           <div class="aim-numbers"><b id="angleValue">28°</b><span id="powerValue">52%</span></div>
         </div>
 

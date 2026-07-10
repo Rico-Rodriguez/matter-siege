@@ -1,6 +1,8 @@
 import RAPIER from "@dimforge/rapier2d-compat";
 import {
+  FORTIFICATION_CONFIG,
   getMaterial,
+  getGuardianTier,
   getModifier,
   getProjectileBody,
   LAUNCH_CONFIG,
@@ -20,7 +22,7 @@ import {
 } from "@matter-siege/shared";
 import { SeededRandom } from "./rng.js";
 
-export const SIM_VERSION = "sim-0.2.0";
+export const SIM_VERSION = "sim-0.3.0";
 export const SIM_HZ = 30;
 const DT = 1 / SIM_HZ;
 const TOWER_CENTERS: [number, number] = [-8, 8];
@@ -120,6 +122,9 @@ export class MatterSimulation {
     switch (command.type) {
       case "mutate":
         result = this.mutateBlock(playerId, command.blockId, command.mutation);
+        break;
+      case "upgradeGuardian":
+        result = this.upgradeGuardian(playerId);
         break;
       case "endBuild":
         result = this.endBuild();
@@ -222,16 +227,17 @@ export class MatterSimulation {
     for (let row = 0; row < 6; row += 1) {
       for (let column = 0; column < columns.length; column += 1) {
         if (row === 5 && (column === 0 || column === 3)) continue;
-        const isCore = row === 1 && column === (owner === 0 ? 1 : 2);
-        const material: MaterialId = isCore ? "core" : row === 0 ? "stone" : palette[(row * 2 + column) % palette.length] ?? "wood";
-        const width = isCore ? 1.08 : 1.06;
-        const height = isCore ? 0.72 : 0.68;
+        const material: MaterialId = row === 0 ? "stone" : palette[(row * 2 + column) % palette.length] ?? "wood";
+        const width = 1.06;
+        const height = 0.68;
         const x = center + (columns[column] ?? 0);
         const y = 0.36 + row * 0.71;
-        const id = isCore ? `p${owner}_core` : `p${owner}_b${blockIndex++}`;
-        this.createBlock(id, owner, material, isCore ? "core" : "block", x, y, width, height);
+        this.createBlock(`p${owner}_b${blockIndex++}`, owner, material, "block", x, y, width, height);
       }
     }
+
+    // The Regent is a physical rooftop objective. Destroy it or drop it to the arena floor to win.
+    this.createBlock(`p${owner}_core`, owner, "core", "core", center, 4.72, 1.18, 0.92);
   }
 
   private createBlock(
@@ -269,6 +275,7 @@ export class MatterSimulation {
       size: { x: width, y: height },
       hp: definition.maxHp,
       maxHp: definition.maxHp,
+      upgradeLevel: 1,
       temperature: 20,
       wetness: 0,
       charge: 0,
@@ -294,8 +301,12 @@ export class MatterSimulation {
 
     switch (mutation) {
       case "reinforce":
-        block.state.maxHp += 24;
-        block.state.hp = Math.min(block.state.maxHp, block.state.hp + 34);
+        if (block.state.upgradeLevel >= FORTIFICATION_CONFIG.block.maxLevel) {
+          return { ok: false, error: "That block is already at maximum level" };
+        }
+        block.state.upgradeLevel += 1;
+        block.state.maxHp += FORTIFICATION_CONFIG.block.hpBonusPerLevel;
+        block.state.hp = Math.min(block.state.maxHp, block.state.hp + FORTIFICATION_CONFIG.block.repairPerLevel);
         block.state.reinforced = true;
         break;
       case "wet":
@@ -311,6 +322,22 @@ export class MatterSimulation {
         block.state.oiled = true;
         break;
     }
+    this.buildPointsValue -= 1;
+    return { ok: true };
+  }
+
+  private upgradeGuardian(playerId: PlayerId): CommandResult {
+    if (this.phaseValue !== "build") return { ok: false, error: "Guardian upgrades are only available while fortifying" };
+    if (this.buildPointsValue <= 0) return { ok: false, error: "No build actions remain" };
+    const guardian = this.blocks.get(`p${playerId}_core`);
+    if (!guardian || guardian.state.broken) return { ok: false, error: "Your Aether Regent is unavailable" };
+    const maximumLevel = FORTIFICATION_CONFIG.guardian.tiers.length;
+    if (guardian.state.upgradeLevel >= maximumLevel) return { ok: false, error: "Your Aether Regent is fully ascended" };
+
+    const nextTier = getGuardianTier(guardian.state.upgradeLevel + 1);
+    guardian.state.upgradeLevel = nextTier.level;
+    guardian.state.maxHp += nextTier.maxHpBonus;
+    guardian.state.hp = Math.min(guardian.state.maxHp, guardian.state.hp + nextTier.maxHpBonus);
     this.buildPointsValue -= 1;
     return { ok: true };
   }
@@ -416,6 +443,7 @@ export class MatterSimulation {
     }
 
     this.updateStatuses();
+    this.checkGuardianFloorDefeat();
     this.removeBrokenBlocks();
     this.checkCollapseWin();
 
@@ -500,6 +528,10 @@ export class MatterSimulation {
         block.state.charge = Math.min(2, block.state.charge + 1.1);
         this.chainLightning(block, projectile.state.owner);
         break;
+    }
+
+    if (block.state.kind === "core") {
+      damage *= 1 - getGuardianTier(block.state.upgradeLevel).directDamageReduction;
     }
 
     block.state.hp -= damage;
@@ -641,6 +673,19 @@ export class MatterSimulation {
     }
   }
 
+  private checkGuardianFloorDefeat(): void {
+    if (this.labMode || this.winnerValue !== null) return;
+    for (const owner of [0, 1] as const) {
+      const guardian = this.blocks.get(`p${owner}_core`);
+      if (!guardian || guardian.state.broken) continue;
+      const floorContactY = guardian.state.size.y / 2 + FORTIFICATION_CONFIG.guardian.floorMargin;
+      if (guardian.state.position.y <= floorContactY) {
+        this.finish(owner === 0 ? 1 : 0);
+        return;
+      }
+    }
+  }
+
   private coreHealth(owner: PlayerId): number {
     const core = this.blocks.get(`p${owner}_core`);
     if (!core) return 0;
@@ -651,7 +696,29 @@ export class MatterSimulation {
     this.activePlayerValue = this.labMode ? 0 : this.activePlayerValue === 0 ? 1 : 0;
     this.turnValue += 1;
     this.buildPointsValue = 2;
+    this.pulseGuardian(this.activePlayerValue);
     this.setPhase("build");
+  }
+
+  private pulseGuardian(owner: PlayerId): void {
+    const guardian = this.blocks.get(`p${owner}_core`);
+    if (!guardian) return;
+    const amount = getGuardianTier(guardian.state.upgradeLevel).repairPerTurn;
+    if (amount <= 0) return;
+    const target = [...this.blocks.values()]
+      .filter((block) => block.state.owner === owner && block.state.kind === "block" && block.state.hp < block.state.maxHp)
+      .sort((a, b) => (b.state.maxHp - b.state.hp) - (a.state.maxHp - a.state.hp) || a.state.id.localeCompare(b.state.id))[0];
+    if (!target) return;
+    const repaired = Math.min(amount, target.state.maxHp - target.state.hp);
+    target.state.hp += repaired;
+    this.events.push({
+      type: "guardianPulse",
+      tick: this.tickValue,
+      position: { ...target.state.position },
+      guardianId: guardian.state.id,
+      targetBlockId: target.state.id,
+      amount: roundStat(repaired),
+    });
   }
 
   private finish(winner: PlayerId): void {

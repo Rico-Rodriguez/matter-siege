@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL, select **Enter the workshop**, then drag backward from the glowing launcher and release.
+Open the Vite URL, select **Enter the workshop**, then drag down and backward anywhere on the open battlefield and release.
 
 For the multiplayer server:
 
