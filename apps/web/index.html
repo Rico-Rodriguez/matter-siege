@@ -19,7 +19,7 @@
           <span class="title-matter">MATTER</span>
           <span class="title-siege">SIEGE</span>
         </div>
-        <p class="splash-deck">Forge the shot. Read the material. Bring down the core.</p>
+        <p class="splash-deck">Defend your tower. Forge a shot. Destroy the rival core—or collapse 70% of its structure.</p>
         <button id="enterButton" class="enter-button">
           <span>Enter the workshop</span>
           <small>LOCAL DUEL · NO DOWNLOAD</small>
@@ -52,15 +52,15 @@
         </header>
 
         <section class="core-meter core-left">
-          <div class="core-heading"><span>YOUR AETHER CORE</span><strong id="leftCoreText">100</strong></div>
+          <div class="core-heading"><span id="leftCoreLabel">YOUR AETHER CORE</span><strong id="leftCoreText">100</strong></div>
           <div class="meter-track"><i id="leftCoreBar"></i></div>
-          <small>STRUCTURAL FIELD // <b id="leftStatus">STABLE</b></small>
+          <small>CORE LATTICE // <b id="leftStatus">STABLE</b></small>
         </section>
 
         <section class="core-meter core-right">
-          <div class="core-heading"><span>RIVAL AETHER CORE</span><strong id="rightCoreText">100</strong></div>
+          <div class="core-heading"><span id="rightCoreLabel">RIVAL AETHER CORE</span><strong id="rightCoreText">100</strong></div>
           <div class="meter-track"><i id="rightCoreBar"></i></div>
-          <small><b id="rightStatus">STABLE</b> // STRUCTURAL FIELD</small>
+          <small><b id="rightStatus">STABLE</b> // CORE LATTICE</small>
         </section>
 
         <aside class="phase-card">
@@ -76,13 +76,13 @@
               <span class="treatment-icon brace">╫</span><span><b>Brass brace</b><small>Repair + reinforce</small></span>
             </button>
             <button class="treatment" data-mutation="wet">
-              <span class="treatment-icon water">≋</span><span><b>Water veil</b><small>Resist flame</small></span>
+              <span class="treatment-icon water">≋</span><span><b>Water veil</b><small>Extinguish + resist ignition</small></span>
             </button>
             <button class="treatment" data-mutation="frozen">
-              <span class="treatment-icon frost">✦</span><span><b>Flash chill</b><small>Hard but brittle</small></span>
+              <span class="treatment-icon frost">✦</span><span><b>Flash chill</b><small>Brittle · fire hits harder</small></span>
             </button>
             <button class="treatment" data-mutation="oiled">
-              <span class="treatment-icon oil">◐</span><span><b>Oil coat</b><small>Slippery · volatile</small></span>
+              <span class="treatment-icon oil">◐</span><span><b>Oil coat</b><small>Burns faster when ignited</small></span>
             </button>
             <div class="action-pips"><span>ACTIONS</span><i id="actionPip1"></i><i id="actionPip2"></i></div>
           </div>
@@ -105,13 +105,12 @@
           <button id="primaryAction" class="primary-action">
             <span>OPEN THE FORGE</span><b>→</b>
           </button>
-          <button id="quickLaunch" class="quick-launch">Use calibrated launch: 40° / 52%</button>
         </aside>
 
-        <div id="aimPrompt" class="aim-prompt">
-          <div class="mouse-glyph"><i></i></div>
-          <div><strong>PULL BACK &amp; RELEASE</strong><small>Drag from the glowing launcher · the dots show the true arc</small></div>
-          <div class="aim-numbers"><b id="angleValue">40°</b><span id="powerValue">52%</span></div>
+        <div id="aimPrompt" class="aim-prompt" aria-hidden="true" hidden>
+          <div class="gesture-glyph" aria-hidden="true"><i></i></div>
+          <div><strong>TOUCH · DRAG · RELEASE</strong><small>Start at the pulsing launcher, then drag down and away from the rival</small></div>
+          <div class="aim-numbers"><b id="angleValue">28°</b><span id="powerValue">52%</span></div>
         </div>
 
         <div id="recipeChip" class="recipe-chip">

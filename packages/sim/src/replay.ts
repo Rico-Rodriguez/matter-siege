@@ -1,7 +1,10 @@
 import type { MatchSnapshot, ReplayData } from "@matter-siege/shared";
-import { MatterSimulation, SIM_HZ } from "./MatterSimulation.js";
+import { MatterSimulation, SIM_HZ, SIM_VERSION } from "./MatterSimulation.js";
 
 export async function simulateReplay(replay: ReplayData, tailSeconds = 2): Promise<MatchSnapshot> {
+  if (replay.version !== SIM_VERSION) {
+    throw new Error(`Replay version ${replay.version} is incompatible with ${SIM_VERSION}`);
+  }
   const simulation = await MatterSimulation.create({ seed: replay.seed, labMode: replay.labMode });
   const commands = [...replay.commands].sort((a, b) => a.tick - b.tick);
   const finalCommandTick = commands.at(-1)?.tick ?? 0;

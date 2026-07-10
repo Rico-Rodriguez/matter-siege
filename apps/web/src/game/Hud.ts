@@ -1,5 +1,6 @@
 import {
   ELEMENTS,
+  LAUNCH_CONFIG,
   MODIFIERS,
   PROJECTILE_BODIES,
   getElement,
@@ -17,7 +18,6 @@ interface HudCallbacks {
   mutation: (mutation: MutationId) => void;
   recipe: (recipe: ProjectileRecipe) => void;
   primary: () => void;
-  quickLaunch: () => void;
   rematch: () => void;
   sound: () => boolean;
 }
@@ -40,6 +40,7 @@ export class Hud {
     this.populateChoices();
     this.bind();
     this.updateRecipeChip();
+    this.setAim(LAUNCH_CONFIG.recommendedAngle, LAUNCH_CONFIG.recommendedPower);
   }
 
   reveal(): void {
@@ -67,35 +68,62 @@ export class Hud {
   update(snapshot: MatchSnapshot, localPlayer: PlayerId): void {
     document.body.dataset.phase = snapshot.phase;
     const isMine = snapshot.activePlayer === localPlayer;
+    document.body.dataset.localTurn = String(isMine);
+    document.body.dataset.localPlayer = String(localPlayer);
     const phaseNames = { build: "FORTIFY", craft: "FORGE", aim: "TAKE AIM", resolve: "IMPACT", finished: "RESOLVED" } as const;
     const phaseNumbers = { build: "1", craft: "2", aim: "3", resolve: "4", finished: "5" } as const;
     const phaseCopy = {
-      build: ["FORTIFY YOUR TOWER", "Choose a treatment", "Select a treatment, then touch one of your tower blocks. Two actions are available."],
-      craft: ["COMPOSE THE ORDNANCE", "Forge a reaction", "Combine a physical body, elemental charge, and flight modifier."],
-      aim: ["CALIBRATE THE TRAJECTORY", "Pull. Read. Release.", "Drag backward from your glowing launcher. Moderate power lands the cleanest shot."],
-      resolve: ["REACTION IN PROGRESS", "Observe the chain", "The physical result is authoritative. Sparks, smoke, and debris are visual interpretation."],
-      finished: ["THE LATTICE HAS FAILED", "Match resolved", "Review the ruin, then recalibrate the arena for another duel."],
+      build: ["STEP 1 · DEFEND", "Protect your tower", "Choose a treatment, then tap up to two non-core blocks in your tower. You may continue without using both actions."],
+      craft: ["STEP 2 · BUILD YOUR SHOT", "Choose your projectile", "Pick one body, one element, and one flight modifier, then chamber the recipe."],
+      aim: ["STEP 3 · AIM AND FIRE", "Drag, then release", "Touch the pulsing launcher, drag down and away from the rival, then release. Or fire the recommended shot below."],
+      resolve: ["SHOT IN FLIGHT", "Watch the impact", "The next turn starts after the shot settles. Win by destroying the rival core or collapsing 70% of their tower."],
+      finished: ["MATCH COMPLETE", "Tower defeated", "A core was destroyed or too much of a tower collapsed. Review the result, then start a rematch."],
     } as const;
+    const rivalPhaseCopy = {
+      build: ["RIVAL TURN", "Rival is defending", "Your controls will return after the rival completes their shot."],
+      craft: ["RIVAL TURN", "Rival is building a shot", "The rival is choosing a projectile recipe."],
+      aim: ["RIVAL TURN", "Rival is aiming", "Watch the rival launcher. Your next turn begins after their shot settles."],
+      resolve: ["RIVAL SHOT IN FLIGHT", "Watch the impact", "Your next turn begins after the rival shot settles."],
+      finished: phaseCopy.finished,
+    } as const;
+    const currentCopy = isMine || snapshot.phase === "finished" ? phaseCopy[snapshot.phase] : rivalPhaseCopy[snapshot.phase];
 
     required("#phaseLabel").textContent = phaseNames[snapshot.phase];
     required("#phaseNumber").textContent = phaseNumbers[snapshot.phase];
-    required("#phaseEyebrow").textContent = `${isMine ? "YOUR TURN" : "RIVAL TURN"} · PHASE 0${phaseNumbers[snapshot.phase]}`;
+    required("#phaseEyebrow").textContent = snapshot.phase === "finished"
+      ? "MATCH COMPLETE · PHASE 05"
+      : `${isMine ? "YOUR TURN" : "RIVAL TURN"} · PHASE 0${phaseNumbers[snapshot.phase]}`;
     required("#turnLabel").textContent = `TURN ${String(snapshot.turn).padStart(2, "0")}`;
-    required("#phaseKicker").textContent = phaseCopy[snapshot.phase][0];
-    required("#phaseTitle").textContent = phaseCopy[snapshot.phase][1];
-    required("#phaseDescription").textContent = phaseCopy[snapshot.phase][2];
+    required("#phaseKicker").textContent = currentCopy[0];
+    required("#phaseTitle").textContent = currentCopy[1];
+    required("#phaseDescription").textContent = currentCopy[2];
     required("#seedLabel").textContent = `SEED ${snapshot.seed}`;
 
     this.setCoreMeter("left", snapshot.coreHealth[0]);
     this.setCoreMeter("right", snapshot.coreHealth[1]);
+    required("#leftCoreLabel").textContent = `${localPlayer === 0 ? "YOUR" : "RIVAL"} AETHER CORE`;
+    required("#rightCoreLabel").textContent = `${localPlayer === 1 ? "YOUR" : "RIVAL"} AETHER CORE`;
     required("#actionPip1").classList.toggle("spent", snapshot.buildPoints < 1);
     required("#actionPip2").classList.toggle("spent", snapshot.buildPoints < 2);
     required("#enemyBanner").classList.toggle("visible", !isMine && snapshot.phase !== "finished");
 
     const primary = required<HTMLButtonElement>("#primaryAction");
-    primary.disabled = !isMine || snapshot.phase === "resolve";
-    primary.querySelector("span")!.textContent = snapshot.phase === "build" ? "OPEN THE FORGE" : snapshot.phase === "craft" ? "CHAMBER THIS RECIPE" : snapshot.phase === "aim" ? "CALIBRATED LAUNCH" : "WAIT FOR RESOLUTION";
-    required<HTMLButtonElement>("#quickLaunch").disabled = !isMine;
+    primary.disabled = !isMine || snapshot.phase === "resolve" || snapshot.phase === "finished";
+    const recommendedShot = `${Math.round(LAUNCH_CONFIG.recommendedAngle)}° / ${Math.round(LAUNCH_CONFIG.recommendedPower * 100)}%`;
+    let primaryLabel = "WAIT FOR THE SHOT";
+    if (!isMine && snapshot.phase !== "finished") primaryLabel = "RIVAL TURN IN PROGRESS";
+    else if (snapshot.phase === "build") primaryLabel = "CONTINUE TO THE FORGE";
+    else if (snapshot.phase === "craft") primaryLabel = "CHAMBER THIS RECIPE";
+    else if (snapshot.phase === "aim") primaryLabel = `FIRE RECOMMENDED SHOT · ${recommendedShot}`;
+    else if (snapshot.phase === "finished") primaryLabel = "MATCH COMPLETE";
+    primary.querySelector("span")!.textContent = primaryLabel;
+    primary.setAttribute("aria-label", snapshot.phase === "aim" && isMine ? `Fire recommended shot at ${recommendedShot}` : primary.textContent?.trim() ?? "Continue");
+
+    const aimPrompt = required("#aimPrompt");
+    const showAimHelp = snapshot.phase === "aim" && isMine;
+    aimPrompt.hidden = !showAimHelp;
+    aimPrompt.style.display = showAimHelp ? "" : "none";
+    aimPrompt.setAttribute("aria-hidden", String(!showAimHelp));
 
     if (snapshot.phase === "finished") this.showWinner(snapshot.winner, localPlayer);
   }
@@ -145,7 +173,6 @@ export class Hud {
       this.callbacks.mutation(this.mutation);
     }));
     required("#primaryAction").addEventListener("click", this.callbacks.primary);
-    required("#quickLaunch").addEventListener("click", this.callbacks.quickLaunch);
     required("#rematchButton").addEventListener("click", this.callbacks.rematch);
     required("#soundButton").addEventListener("click", () => {
       const enabled = this.callbacks.sound();
@@ -196,9 +223,12 @@ export class Hud {
 
   private showWinner(winner: PlayerId | null, localPlayer: PlayerId): void {
     const won = winner === localPlayer;
-    required("#winTitle").textContent = this.mode === "lab" ? "EXPERIMENT COMPLETE" : won ? "RIVAL CORE COLLAPSED" : "YOUR CORE COLLAPSED";
-    required("#winCopy").textContent = this.mode === "lab" ? "The laboratory is ready for another composition." : won ? "A clean reaction. The rival lattice has failed." : "The ruin is data. Rebuild, recraft, return.";
+    required("#winTitle").textContent = this.mode === "lab" ? "EXPERIMENT COMPLETE" : won ? "RIVAL TOWER DEFEATED" : "YOUR TOWER FELL";
+    required("#winCopy").textContent = this.mode === "lab"
+      ? "The laboratory is ready for another composition."
+      : won
+        ? "You destroyed the rival core or collapsed enough of its structure."
+        : "Your core was destroyed or too much of your structure collapsed.";
     required("#winPanel").classList.add("visible");
   }
 }
-

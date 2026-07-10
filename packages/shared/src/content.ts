@@ -3,6 +3,7 @@ import projectileCatalog from "../../../content/projectiles/catalog.json" with {
 import type {
   ElementDef,
   ElementId,
+  LaunchConfig,
   MaterialDef,
   MaterialId,
   ModifierDef,
@@ -11,6 +12,7 @@ import type {
   ProjectileBodyId,
 } from "./types.js";
 
+export const LAUNCH_CONFIG = projectileCatalog.launchConfig as LaunchConfig;
 export const MATERIALS = materialCatalog as MaterialDef[];
 export const PROJECTILE_BODIES = projectileCatalog.bodies as ProjectileBodyDef[];
 export const ELEMENTS = projectileCatalog.elements as ElementDef[];
@@ -50,8 +52,21 @@ export function validateContent(): string[] {
     if (material.toughness <= 0) errors.push(`${material.id} must have positive toughness`);
     if (!material.impactVfx || !material.breakVfx) errors.push(`${material.id} requires VFX references`);
   }
+  if (LAUNCH_CONFIG.positions.length !== 2 || LAUNCH_CONFIG.positions.some((value) => !Number.isFinite(value))) {
+    errors.push("Launch config requires one finite launcher position per player");
+  }
+  if (!Number.isFinite(LAUNCH_CONFIG.height) || LAUNCH_CONFIG.height <= 0) errors.push("Launcher height must be positive");
+  if (!(LAUNCH_CONFIG.minAngle < LAUNCH_CONFIG.recommendedAngle && LAUNCH_CONFIG.recommendedAngle < LAUNCH_CONFIG.maxAngle)) {
+    errors.push("Recommended launch angle must be inside the legal angle range");
+  }
+  if (!(LAUNCH_CONFIG.minPower <= LAUNCH_CONFIG.recommendedPower && LAUNCH_CONFIG.recommendedPower <= LAUNCH_CONFIG.maxPower)) {
+    errors.push("Recommended launch power must be inside the legal power range");
+  }
+  if (LAUNCH_CONFIG.baseSpeed <= 0 || LAUNCH_CONFIG.powerSpeed <= 0) errors.push("Launch speed values must be positive");
+  if (LAUNCH_CONFIG.maxFlightSeconds <= 0 || LAUNCH_CONFIG.postImpactSeconds <= 0) {
+    errors.push("Projectile lifetimes must be positive");
+  }
   if (MATERIALS.length < 8) errors.push("The launch catalog requires seven materials plus the core");
   if (ELEMENTS.length < 5) errors.push("The launch catalog requires five elements");
   return errors;
 }
-

@@ -3,6 +3,7 @@ import {
   getMaterial,
   getModifier,
   getProjectileBody,
+  LAUNCH_CONFIG,
   type BlockRuntimeState,
   type ElementId,
   type LoggedCommand,
@@ -19,11 +20,10 @@ import {
 } from "@matter-siege/shared";
 import { SeededRandom } from "./rng.js";
 
-export const SIM_VERSION = "sim-0.1.0";
+export const SIM_VERSION = "sim-0.2.0";
 export const SIM_HZ = 30;
 const DT = 1 / SIM_HZ;
 const TOWER_CENTERS: [number, number] = [-8, 8];
-const LAUNCHERS: [number, number] = [-13.4, 13.4];
 
 let rapierInitialization: Promise<void> | undefined;
 
@@ -36,6 +36,7 @@ interface InternalProjectile {
   state: ProjectileRuntimeState;
   body: RAPIER.RigidBody;
   bornTick: number;
+  firstImpactTick: number | null;
   hits: Set<string>;
   impacted: boolean;
 }
@@ -84,7 +85,6 @@ export class MatterSimulation {
   private turnValue = 1;
   private winnerValue: PlayerId | null = null;
   private projectileSequence = 0;
-  private lastLaunchTick = -10_000;
 
   private constructor(world: RAPIER.World, options: SimulationOptions) {
     this.world = world;
@@ -337,8 +337,12 @@ export class MatterSimulation {
 
   private launch(playerId: PlayerId, angle: number, power: number): CommandResult {
     if (this.phaseValue !== "aim") return { ok: false, error: "Aiming is not active" };
-    if (!Number.isFinite(angle) || angle < 15 || angle > 78) return { ok: false, error: "Launch angle is outside the legal arc" };
-    if (!Number.isFinite(power) || power < 0.2 || power > 1) return { ok: false, error: "Launch power is outside the legal range" };
+    if (!Number.isFinite(angle) || angle < LAUNCH_CONFIG.minAngle || angle > LAUNCH_CONFIG.maxAngle) {
+      return { ok: false, error: "Launch angle is outside the legal arc" };
+    }
+    if (!Number.isFinite(power) || power < LAUNCH_CONFIG.minPower || power > LAUNCH_CONFIG.maxPower) {
+      return { ok: false, error: "Launch power is outside the legal range" };
+    }
 
     const recipe = this.selectedRecipes[playerId];
     const modifier = getModifier(recipe.modifier);
@@ -348,7 +352,6 @@ export class MatterSimulation {
       const spread = modifier.projectileCount === 1 ? 0 : (index - 1) * 0.075;
       this.spawnProjectile(playerId, recipe, baseRadians + spread, power, direction, index);
     }
-    this.lastLaunchTick = this.tickValue;
     this.setPhase("resolve");
     return { ok: true };
   }
@@ -363,9 +366,9 @@ export class MatterSimulation {
   ): void {
     const bodyDef = getProjectileBody(recipe.body);
     const modifier = getModifier(recipe.modifier);
-    const speed = (9 + power * 15) * modifier.powerScale;
-    const x = LAUNCHERS[owner];
-    const y = 1.05 + spreadIndex * 0.03;
+    const speed = (LAUNCH_CONFIG.baseSpeed + power * LAUNCH_CONFIG.powerSpeed) * modifier.powerScale;
+    const x = LAUNCH_CONFIG.positions[owner];
+    const y = LAUNCH_CONFIG.height + spreadIndex * 0.03;
     const rigidBody = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(x, y)
@@ -395,6 +398,7 @@ export class MatterSimulation {
       },
       body: rigidBody,
       bornTick: this.tickValue,
+      firstImpactTick: null,
       hits: new Set(),
       impacted: false,
     });
@@ -415,12 +419,7 @@ export class MatterSimulation {
     this.removeBrokenBlocks();
     this.checkCollapseWin();
 
-    if (
-      this.phaseValue === "resolve" &&
-      this.projectiles.size === 0 &&
-      this.tickValue - this.lastLaunchTick > 24 &&
-      this.winnerValue === null
-    ) {
+    if (this.phaseValue === "resolve" && this.projectiles.size === 0 && this.winnerValue === null) {
       this.beginNextTurn();
     }
   }
@@ -444,12 +443,13 @@ export class MatterSimulation {
 
   private findProjectileImpact(projectile: InternalProjectile): void {
     for (const block of this.blocks.values()) {
-      if (block.state.broken || projectile.hits.has(block.state.id)) continue;
+      if (block.state.owner === projectile.state.owner || block.state.broken || projectile.hits.has(block.state.id)) continue;
       const dx = Math.abs(projectile.state.position.x - block.state.position.x);
       const dy = Math.abs(projectile.state.position.y - block.state.position.y);
       if (dx > block.state.size.x / 2 + projectile.state.radius + 0.1) continue;
       if (dy > block.state.size.y / 2 + projectile.state.radius + 0.1) continue;
       projectile.hits.add(block.state.id);
+      projectile.firstImpactTick ??= this.tickValue;
       this.resolveImpact(projectile, block);
       if (projectile.state.recipe.modifier !== "heavy") projectile.impacted = true;
       if (projectile.state.recipe.modifier === "sticky") {
@@ -522,7 +522,7 @@ export class MatterSimulation {
   private chainLightning(origin: InternalBlock, projectileOwner: PlayerId): void {
     const candidates = [...this.blocks.values()]
       .filter((candidate) => {
-        if (candidate === origin || candidate.state.broken) return false;
+        if (candidate === origin || candidate.state.owner === projectileOwner || candidate.state.broken) return false;
         const conductive = getMaterial(candidate.state.material).conductivity;
         return conductive > 0.22 && distance(origin.state.position, candidate.state.position) < 2.15;
       })
@@ -613,9 +613,13 @@ export class MatterSimulation {
     const age = this.tickValue - projectile.bornTick;
     const position = projectile.body.translation();
     const speed = Math.hypot(projectile.body.linvel().x, projectile.body.linvel().y);
-    const stickyExpired = projectile.state.recipe.modifier === "sticky" && projectile.impacted && age > 50;
-    const stopped = age > 45 && speed < 0.38;
-    if (age > SIM_HZ * 8 || position.y < -2 || Math.abs(position.x) > 21 || stickyExpired || stopped) {
+    const maxFlightTicks = Math.ceil(SIM_HZ * LAUNCH_CONFIG.maxFlightSeconds);
+    const postImpactTicks = Math.ceil(SIM_HZ * LAUNCH_CONFIG.postImpactSeconds);
+    const flightExpired = projectile.firstImpactTick === null && age >= maxFlightTicks;
+    const impactSettled =
+      projectile.firstImpactTick !== null && this.tickValue - projectile.firstImpactTick >= postImpactTicks;
+    const stoppedMiss = projectile.firstImpactTick === null && age > 45 && speed < 0.38;
+    if (flightExpired || impactSettled || position.y < -2 || Math.abs(position.x) > 21 || stoppedMiss) {
       this.world.removeRigidBody(projectile.body);
       this.projectiles.delete(projectile.state.id);
     }

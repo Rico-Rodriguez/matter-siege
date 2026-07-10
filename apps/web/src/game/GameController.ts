@@ -1,16 +1,24 @@
-import type {
-  MatchSnapshot,
-  MutationId,
-  PlayerCommand,
-  PlayerId,
-  ProjectileRecipe,
-  SimEvent,
+import {
+  LAUNCH_CONFIG,
+  type MatchSnapshot,
+  type MutationId,
+  type PlayerCommand,
+  type PlayerId,
+  type ProjectileRecipe,
+  type SimEvent,
 } from "@matter-siege/shared";
 import { MatterSimulation, SIM_HZ } from "@matter-siege/sim";
 import { AudioDirector } from "./AudioDirector.js";
 import { Hud, type GameMode } from "./Hud.js";
 import { NetworkSession } from "./NetworkSession.js";
 import { SceneWorld } from "./SceneWorld.js";
+
+const AIM_START_RADIUS = 1.8;
+const AIM_DEADZONE_PX = 16;
+const AIM_DEADZONE_WORLD = 0.18;
+const AIM_FULL_PULL_WORLD = 4.8;
+
+const clamp = (value: number, minimum: number, maximum: number): number => Math.max(minimum, Math.min(maximum, value));
 
 export class GameController {
   readonly hud: Hud;
@@ -24,9 +32,12 @@ export class GameController {
   private aiTimer = 0;
   private aiKey = "";
   private generation = 0;
-  private aiming = false;
-  private aimAngle = 40;
-  private aimPower = 0.52;
+  private aimPointerId: number | null = null;
+  private aimStartWorld?: { x: number; y: number };
+  private aimStartClient?: { x: number; y: number };
+  private aimReady = false;
+  private aimAngle = LAUNCH_CONFIG.recommendedAngle;
+  private aimPower = LAUNCH_CONFIG.recommendedPower;
   private selectedMutation: MutationId = "reinforce";
 
   constructor(
@@ -42,7 +53,6 @@ export class GameController {
       },
       recipe: () => this.audio.ui(610),
       primary: () => this.primaryAction(),
-      quickLaunch: () => this.quickLaunch(),
       rematch: () => void this.startMode(this.mode),
       sound: () => this.audio.toggle(),
     });
@@ -57,8 +67,10 @@ export class GameController {
     const generation = ++this.generation;
     this.mode = mode;
     this.hud.setMode(mode);
+    this.resetAimGesture();
     this.world.clearAim();
-    this.aiming = false;
+    this.world.setActiveLauncher(null);
+    this.snapshot = undefined;
     this.accumulator = 0;
     this.aiTimer = 0;
     this.aiKey = "";
@@ -118,9 +130,17 @@ export class GameController {
   }
 
   private receiveSnapshot(snapshot: MatchSnapshot): void {
+    const wasLocalAim = this.isLocalAim(this.snapshot);
     this.snapshot = snapshot;
     this.world.sync(snapshot);
     this.hud.update(snapshot, this.localPlayer);
+    const isLocalAim = this.isLocalAim(snapshot);
+    this.world.setActiveLauncher(isLocalAim ? this.localPlayer : null);
+    if (isLocalAim && !wasLocalAim) this.showRecommendedAim();
+    else if (!isLocalAim && (wasLocalAim || this.aimPointerId !== null)) {
+      this.resetAimGesture();
+      this.world.clearAim();
+    }
   }
 
   private processEvents(events: SimEvent[]): void {
@@ -154,19 +174,21 @@ export class GameController {
     this.audio.ui();
     if (this.snapshot.phase === "build") this.command({ type: "endBuild" });
     else if (this.snapshot.phase === "craft") this.command({ type: "craft", recipe: { ...this.hud.recipe } });
-    else if (this.snapshot.phase === "aim") this.quickLaunch();
+    else if (this.snapshot.phase === "aim") this.fireRecommendedShot();
   }
 
-  private quickLaunch(): void {
+  private fireRecommendedShot(): void {
     if (!this.snapshot || this.snapshot.phase !== "aim" || this.snapshot.activePlayer !== this.localPlayer) return;
-    if (this.command({ type: "launch", angle: 40, power: 0.52 })) {
-      this.audio.launch(this.hud.recipe.element);
+    const recipe = this.snapshot.selectedRecipes[this.localPlayer];
+    if (this.command({ type: "launch", angle: LAUNCH_CONFIG.recommendedAngle, power: LAUNCH_CONFIG.recommendedPower })) {
+      this.audio.launch(recipe.element);
       this.world.clearAim();
     }
   }
 
   private bindPointerControls(): void {
     this.canvas.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary || event.button !== 0 || this.aimPointerId !== null) return;
       const snapshot = this.snapshot;
       if (!snapshot || snapshot.activePlayer !== this.localPlayer) return;
       if (snapshot.phase === "build") {
@@ -187,48 +209,100 @@ export class GameController {
       const point = this.world.screenToWorld(event.clientX, event.clientY);
       if (!point) return;
       const launcher = this.world.getLauncher(this.localPlayer);
-      if (Math.hypot(point.x - launcher.x, point.y - launcher.y) > 2.8) {
-        this.hud.showToast("Begin the pull at the glowing launcher");
+      if (Math.hypot(point.x - launcher.x, point.y - launcher.y) > AIM_START_RADIUS) {
+        this.hud.showToast("Touch the pulsing launcher to begin");
         return;
       }
-      this.aiming = true;
+      this.aimPointerId = event.pointerId;
+      this.aimStartWorld = point;
+      this.aimStartClient = { x: event.clientX, y: event.clientY };
+      this.aimReady = false;
       this.canvas.setPointerCapture(event.pointerId);
-      this.updateAim(event.clientX, event.clientY);
     });
 
     this.canvas.addEventListener("pointermove", (event) => {
-      if (this.aiming) this.updateAim(event.clientX, event.clientY);
+      if (event.pointerId === this.aimPointerId) this.updateAim(event.clientX, event.clientY);
     });
 
     const release = (event: PointerEvent): void => {
-      if (!this.aiming) return;
-      this.updateAim(event.clientX, event.clientY);
-      this.aiming = false;
-      if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
-      if (this.aimPower < 0.2) {
-        this.world.clearAim();
+      if (event.pointerId !== this.aimPointerId) return;
+      const ready = this.updateAim(event.clientX, event.clientY);
+      const angle = this.aimAngle;
+      const power = this.aimPower;
+      this.resetAimGesture();
+      if (!ready) {
+        this.showRecommendedAim();
+        this.hud.showToast("Drag farther, then release to fire");
         return;
       }
-      if (this.command({ type: "launch", angle: this.aimAngle, power: this.aimPower })) {
-        this.audio.launch(this.hud.recipe.element);
+      const recipe = this.snapshot?.selectedRecipes[this.localPlayer] ?? this.hud.recipe;
+      if (this.command({ type: "launch", angle, power })) {
+        this.audio.launch(recipe.element);
         this.world.clearAim();
       }
     };
     this.canvas.addEventListener("pointerup", release);
-    this.canvas.addEventListener("pointercancel", release);
+    this.canvas.addEventListener("pointercancel", (event) => {
+      if (event.pointerId !== this.aimPointerId) return;
+      this.resetAimGesture();
+      this.showRecommendedAim();
+    });
+    this.canvas.addEventListener("lostpointercapture", (event) => {
+      if (event.pointerId !== this.aimPointerId) return;
+      this.resetAimGesture(false);
+      this.showRecommendedAim();
+    });
   }
 
-  private updateAim(clientX: number, clientY: number): void {
+  private updateAim(clientX: number, clientY: number): boolean {
+    const startWorld = this.aimStartWorld;
+    const startClient = this.aimStartClient;
+    if (!startWorld || !startClient || !this.isLocalAim(this.snapshot)) {
+      this.aimReady = false;
+      return false;
+    }
     const point = this.world.screenToWorld(clientX, clientY);
-    if (!point) return;
-    const launcher = this.world.getLauncher(this.localPlayer);
+    if (!point) {
+      this.aimReady = false;
+      return false;
+    }
     const direction = this.localPlayer === 0 ? 1 : -1;
-    const horizontalPull = Math.max(0.01, (launcher.x - point.x) * direction);
-    const verticalPull = Math.max(0.01, launcher.y - point.y);
-    this.aimAngle = Math.max(15, Math.min(78, (Math.atan2(verticalPull, horizontalPull) * 180) / Math.PI));
-    this.aimPower = Math.max(0.2, Math.min(1, Math.hypot(horizontalPull, verticalPull) / 4.8));
+    const horizontalPull = Math.max(0, (startWorld.x - point.x) * direction);
+    const verticalPull = Math.max(0, startWorld.y - point.y);
+    const pullDistance = Math.hypot(horizontalPull, verticalPull);
+    const screenDistance = Math.hypot(clientX - startClient.x, clientY - startClient.y);
+    this.aimReady = screenDistance >= AIM_DEADZONE_PX && pullDistance >= AIM_DEADZONE_WORLD;
+    if (!this.aimReady) return false;
+
+    this.aimAngle = clamp((Math.atan2(verticalPull, horizontalPull) * 180) / Math.PI, LAUNCH_CONFIG.minAngle, LAUNCH_CONFIG.maxAngle);
+    this.aimPower = clamp(pullDistance / AIM_FULL_PULL_WORLD, LAUNCH_CONFIG.minPower, LAUNCH_CONFIG.maxPower);
     this.hud.setAim(this.aimAngle, this.aimPower);
-    this.world.showAim(this.localPlayer, this.aimAngle, this.aimPower, this.hud.recipe);
+    const recipe = this.snapshot?.selectedRecipes[this.localPlayer] ?? this.hud.recipe;
+    this.world.showAim(this.localPlayer, this.aimAngle, this.aimPower, recipe);
+    return true;
+  }
+
+  private isLocalAim(snapshot?: MatchSnapshot): boolean {
+    return snapshot?.phase === "aim" && snapshot.activePlayer === this.localPlayer;
+  }
+
+  private showRecommendedAim(): void {
+    const snapshot = this.snapshot;
+    if (!this.isLocalAim(snapshot) || !snapshot) return;
+    this.aimAngle = LAUNCH_CONFIG.recommendedAngle;
+    this.aimPower = LAUNCH_CONFIG.recommendedPower;
+    this.aimReady = false;
+    this.hud.setAim(this.aimAngle, this.aimPower);
+    this.world.showAim(this.localPlayer, this.aimAngle, this.aimPower, snapshot.selectedRecipes[this.localPlayer]);
+  }
+
+  private resetAimGesture(releaseCapture = true): void {
+    const pointerId = this.aimPointerId;
+    this.aimPointerId = null;
+    this.aimStartWorld = undefined;
+    this.aimStartClient = undefined;
+    this.aimReady = false;
+    if (releaseCapture && pointerId !== null && this.canvas.hasPointerCapture(pointerId)) this.canvas.releasePointerCapture(pointerId);
   }
 
   private updateAi(deltaSeconds: number): void {
@@ -260,8 +334,10 @@ export class GameController {
       ];
       this.simulation.applyCommand(1, { type: "craft", recipe: recipes[snapshot.turn % recipes.length] ?? recipes[0]! });
     } else if (snapshot.phase === "aim") {
-      const angle = 38.5 + ((snapshot.seed + snapshot.turn * 17) % 35) / 10;
-      const power = 0.47 + ((snapshot.seed + snapshot.turn * 11) % 9) / 100;
+      const angleOffset = (((snapshot.seed + snapshot.turn * 17) % 21) - 10) / 10;
+      const powerOffset = (((snapshot.seed + snapshot.turn * 11) % 9) - 4) / 100;
+      const angle = clamp(LAUNCH_CONFIG.recommendedAngle + angleOffset, LAUNCH_CONFIG.minAngle, LAUNCH_CONFIG.maxAngle);
+      const power = clamp(LAUNCH_CONFIG.recommendedPower + powerOffset, LAUNCH_CONFIG.minPower, LAUNCH_CONFIG.maxPower);
       const recipe = snapshot.selectedRecipes[1];
       if (this.simulation.applyCommand(1, { type: "launch", angle, power }).ok) this.audio.launch(recipe.element);
     }
@@ -281,4 +357,3 @@ export class GameController {
     this.hud.showToast("Replay command log exported");
   }
 }
-

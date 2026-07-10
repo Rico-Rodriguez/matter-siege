@@ -25,6 +25,7 @@ import {
 } from "@babylonjs/core";
 import {
   ELEMENTS,
+  LAUNCH_CONFIG,
   getElement,
   getMaterial,
   getModifier,
@@ -52,14 +53,22 @@ interface VisualProjectile {
   light: PointLight;
 }
 
+interface LauncherVisual {
+  marker: Mesh;
+  ring: Mesh;
+  pointer: Mesh;
+  light: PointLight;
+  color: Color3;
+  markerMaterial: StandardMaterial;
+  signalMaterial: StandardMaterial;
+}
+
 interface DebrisPiece {
   mesh: Mesh;
   velocity: Vector3;
   spin: Vector3;
   life: number;
 }
-
-const LAUNCHER_X: [number, number] = [-13.4, 13.4];
 
 const hex = (value: string): Color3 => Color3.FromHexString(value);
 const elementColor = (element: ElementId): Color3 => hex(getElement(element).color);
@@ -72,10 +81,12 @@ export class SceneWorld {
   private camera!: FreeCamera;
   private shadow!: ShadowGenerator;
   private glow!: GlowLayer;
+  private pipeline?: DefaultRenderingPipeline;
   private readonly cameraBase = new Vector3(0, 7.3, -28);
   private readonly cameraTarget = new Vector3(0, 3.05, 0);
   private readonly blocks = new Map<string, VisualBlock>();
   private readonly projectiles = new Map<string, VisualProjectile>();
+  private readonly launchers = new Map<PlayerId, LauncherVisual>();
   private readonly materials = new Map<MaterialId, PBRMaterial>();
   private readonly burning = new Map<string, ParticleSystem>();
   private readonly coreLights = new Map<string, PointLight>();
@@ -84,6 +95,7 @@ export class SceneWorld {
   private particleTexture!: DynamicTexture;
   private aimMaterial!: StandardMaterial;
   private frameCallback: (deltaSeconds: number) => void = () => undefined;
+  private activeLauncher: PlayerId | null = null;
   private shake = 0;
   private elapsed = 0;
 
@@ -150,13 +162,29 @@ export class SceneWorld {
     const height = Math.max(1, this.canvas.clientHeight);
     const aspect = width / height;
     const desktopHalfHorizontalFov = Math.tan(SceneWorld.DESKTOP_VERTICAL_FOV / 2) * SceneWorld.DESKTOP_ASPECT;
+    const portraitFraming = aspect < 0.8 ? 0.84 : aspect < 1.15 ? 0.92 : 1;
+    const framedHalfHorizontalFov = desktopHalfHorizontalFov * portraitFraming;
     this.camera.fov = aspect >= SceneWorld.DESKTOP_ASPECT
       ? SceneWorld.DESKTOP_VERTICAL_FOV
-      : 2 * Math.atan(desktopHalfHorizontalFov / aspect);
+      : 2 * Math.atan(framedHalfHorizontalFov / aspect);
+    this.configurePostProcessing(width, height);
   }
 
   setFrameCallback(callback: (deltaSeconds: number) => void): void {
     this.frameCallback = callback;
+  }
+
+  setActiveLauncher(player: PlayerId | null): void {
+    this.activeLauncher = player;
+    for (const [launcherPlayer, visual] of this.launchers) {
+      const active = launcherPlayer === player;
+      visual.marker.visibility = active ? 1 : 0.42;
+      visual.ring.visibility = active ? 1 : 0.3;
+      visual.pointer.visibility = active ? 0.95 : 0.22;
+      visual.light.intensity = active ? 12 : 2.5;
+      visual.markerMaterial.emissiveColor = visual.color.scale(active ? 1 : 0.32);
+      visual.signalMaterial.emissiveColor = visual.color.scale(active ? 0.86 : 0.3);
+    }
   }
 
   sync(snapshot: MatchSnapshot): void {
@@ -202,7 +230,7 @@ export class SceneWorld {
   }
 
   getLauncher(player: PlayerId): { x: number; y: number } {
-    return { x: LAUNCHER_X[player], y: 1.05 };
+    return { x: LAUNCH_CONFIG.positions[player], y: LAUNCH_CONFIG.height };
   }
 
   screenToWorld(clientX: number, clientY: number): { x: number; y: number } | null {
@@ -228,7 +256,7 @@ export class SceneWorld {
     const direction = player === 0 ? 1 : -1;
     const radians = (angle * Math.PI) / 180;
     const modifier = getModifier(recipe.modifier);
-    const speed = (9 + power * 15) * modifier.powerScale;
+    const speed = (LAUNCH_CONFIG.baseSpeed + power * LAUNCH_CONFIG.powerSpeed) * modifier.powerScale;
     const velocityX = Math.cos(radians) * speed * direction;
     const velocityY = Math.sin(radians) * speed;
     const origin = this.getLauncher(player);
@@ -287,9 +315,10 @@ export class SceneWorld {
       material.albedoTexture = this.patternTexture(id, definition.color);
       material.environmentIntensity = 0.75;
       if (id === "glass" || id === "ice") {
-        material.alpha = id === "glass" ? 0.62 : 0.82;
+        material.alpha = id === "glass" ? 0.84 : 0.94;
         material.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHABLEND;
         material.indexOfRefraction = id === "glass" ? 1.5 : 1.31;
+        material.needDepthPrePass = true;
       }
       if (id === "core") {
         material.emissiveColor = new Color3(0.65, 0.28, 0.045);
@@ -365,8 +394,8 @@ export class SceneWorld {
     }
 
     const moonMaterial = new StandardMaterial("moonWindow", this.scene);
-    moonMaterial.diffuseColor = new Color3(0.18, 0.39, 0.43);
-    moonMaterial.emissiveColor = new Color3(0.12, 0.28, 0.31);
+    moonMaterial.diffuseColor = new Color3(0.12, 0.29, 0.32);
+    moonMaterial.emissiveColor = new Color3(0.055, 0.13, 0.15);
     const moon = MeshBuilder.CreateDisc("moonWindow", { radius: 2.5, tessellation: 48 }, this.scene);
     moon.position.set(0, 8.3, 5.9);
     moon.material = moonMaterial;
@@ -388,10 +417,18 @@ export class SceneWorld {
     brass.metallic = 0.82;
     brass.roughness = 0.3;
     for (const player of [0, 1] as const) {
-      const x = LAUNCHER_X[player];
+      const x = LAUNCH_CONFIG.positions[player];
       const direction = player === 0 ? 1 : -1;
+      const color = player === 0 ? new Color3(0.25, 0.9, 0.78) : new Color3(0.92, 0.36, 0.22);
       const root = new TransformNode(`launcher_${player}`, this.scene);
-      root.position.x = x;
+      root.position.set(x, 0, -0.12);
+
+      const base = MeshBuilder.CreateBox(`launcherBase_${player}`, { width: 1.36, height: 0.18, depth: 1.08 }, this.scene);
+      base.parent = root;
+      base.position.y = 0.09;
+      base.material = brass;
+      this.shadow.addShadowCaster(base);
+
       for (const offset of [-0.34, 0.34]) {
         const arm = MeshBuilder.CreateCylinder(`launcherArm_${player}_${offset}`, { height: 2.25, diameter: 0.21, tessellation: 10 }, this.scene);
         arm.parent = root;
@@ -400,16 +437,49 @@ export class SceneWorld {
         arm.material = wood;
         this.shadow.addShadowCaster(arm);
       }
-      const cup = MeshBuilder.CreateSphere(`launcherCup_${player}`, { diameter: 0.38, segments: 16 }, this.scene);
+
+      const rail = MeshBuilder.CreateBox(`launcherRail_${player}`, { width: 1.22, height: 0.14, depth: 0.18 }, this.scene);
+      rail.parent = root;
+      rail.position.set(direction * 0.24, 0.74, -0.42);
+      rail.rotation.z = direction * 0.22;
+      rail.material = brass;
+      this.shadow.addShadowCaster(rail);
+
+      const signalMaterial = new StandardMaterial(`launcherSignal_${player}`, this.scene);
+      signalMaterial.diffuseColor = color.scale(0.45);
+      signalMaterial.emissiveColor = color.scale(0.8);
+      signalMaterial.disableLighting = true;
+      const markerMaterial = new StandardMaterial(`launcherMarker_${player}`, this.scene);
+      markerMaterial.diffuseColor = color.scale(0.35);
+      markerMaterial.emissiveColor = color;
+      markerMaterial.disableLighting = true;
+
+      const cup = MeshBuilder.CreateSphere(`launcherCup_${player}`, { diameter: 0.52, segments: 18 }, this.scene);
       cup.parent = root;
-      cup.position.set(0, 1.05, -0.06);
-      cup.material = brass;
-      const glowLight = new PointLight(`launcherGlow_${player}`, new Vector3(x, 1.1, -0.6), this.scene);
-      glowLight.diffuse = player === 0 ? new Color3(0.25, 0.9, 0.78) : new Color3(0.92, 0.36, 0.22);
-      glowLight.intensity = 5;
-      glowLight.range = 3.3;
-      root.rotation.y = direction === 1 ? 0 : Math.PI;
+      cup.position.set(0, LAUNCH_CONFIG.height, -0.54);
+      cup.material = signalMaterial;
+
+      const marker = MeshBuilder.CreateSphere(`launcherTarget_${player}`, { diameter: 0.2, segments: 12 }, this.scene);
+      marker.parent = root;
+      marker.position.set(0, LAUNCH_CONFIG.height, -0.9);
+      marker.material = markerMaterial;
+      const ring = MeshBuilder.CreateTorus(`launcherRing_${player}`, { diameter: 1.04, thickness: 0.065, tessellation: 36 }, this.scene);
+      ring.parent = root;
+      ring.position.set(0, LAUNCH_CONFIG.height, -0.88);
+      ring.rotation.x = Math.PI / 2;
+      ring.material = markerMaterial;
+      const pointer = MeshBuilder.CreatePolyhedron(`launcherPointer_${player}`, { type: 1, size: 0.25 }, this.scene);
+      pointer.parent = root;
+      pointer.position.set(0, LAUNCH_CONFIG.height + 1.05, -0.9);
+      pointer.material = markerMaterial;
+
+      const glowLight = new PointLight(`launcherGlow_${player}`, new Vector3(x, LAUNCH_CONFIG.height, -0.9), this.scene);
+      glowLight.diffuse = color;
+      glowLight.intensity = 2.5;
+      glowLight.range = 4;
+      this.launchers.set(player, { marker, ring, pointer, light: glowLight, color, markerMaterial, signalMaterial });
     }
+    this.setActiveLauncher(this.activeLauncher);
   }
 
   private createAimDots(): void {
@@ -417,7 +487,7 @@ export class SceneWorld {
     this.aimMaterial.disableLighting = true;
     this.aimMaterial.emissiveColor = elementColor("fire");
     for (let index = 0; index < 26; index += 1) {
-      const dot = MeshBuilder.CreateSphere(`arcDot_${index}`, { diameter: index % 4 === 0 ? 0.095 : 0.055, segments: 6 }, this.scene);
+      const dot = MeshBuilder.CreateSphere(`arcDot_${index}`, { diameter: index % 4 === 0 ? 0.13 : 0.075, segments: 6 }, this.scene);
       dot.material = this.aimMaterial;
       dot.isVisible = false;
       this.aimDots.push(dot);
@@ -426,19 +496,27 @@ export class SceneWorld {
 
   private createPostProcessing(): void {
     this.glow = new GlowLayer("materialGlow", this.scene, { blurKernelSize: 48 });
-    this.glow.intensity = 0.58;
-    const pipeline = new DefaultRenderingPipeline("cinematic", true, this.scene, [this.camera]);
-    pipeline.samples = 2;
-    pipeline.fxaaEnabled = true;
-    pipeline.bloomEnabled = true;
-    pipeline.bloomThreshold = 0.72;
-    pipeline.bloomWeight = 0.34;
-    pipeline.bloomKernel = 48;
-    pipeline.imageProcessingEnabled = true;
-    pipeline.imageProcessing.contrast = 1.28;
-    pipeline.imageProcessing.exposure = 1.08;
-    pipeline.chromaticAberrationEnabled = true;
-    pipeline.chromaticAberration.aberrationAmount = 2.2;
+    const moon = this.scene.getMeshByName("moonWindow") as Mesh | null;
+    if (moon) this.glow.addExcludedMesh(moon);
+    this.pipeline = new DefaultRenderingPipeline("cinematic", true, this.scene, [this.camera]);
+    this.pipeline.samples = 2;
+    this.pipeline.fxaaEnabled = true;
+    this.pipeline.bloomEnabled = true;
+    this.pipeline.bloomThreshold = 0.78;
+    this.pipeline.imageProcessingEnabled = true;
+    this.configurePostProcessing(this.canvas.clientWidth, this.canvas.clientHeight);
+  }
+
+  private configurePostProcessing(width: number, height: number): void {
+    if (!this.pipeline || !this.glow) return;
+    const compact = width <= 760 || (width <= 1000 && height <= 560);
+    this.glow.intensity = compact ? 0.38 : 0.5;
+    this.pipeline.bloomWeight = compact ? 0.18 : 0.28;
+    this.pipeline.bloomKernel = compact ? 32 : 48;
+    this.pipeline.imageProcessing.contrast = compact ? 1.16 : 1.23;
+    this.pipeline.imageProcessing.exposure = compact ? 1.02 : 1.06;
+    this.pipeline.chromaticAberrationEnabled = !compact;
+    this.pipeline.chromaticAberration.aberrationAmount = compact ? 0 : 0.7;
   }
 
   private createAmbientDust(): void {
@@ -508,7 +586,7 @@ export class SceneWorld {
       const cage = MeshBuilder.CreateBox(`coreCage_${state.id}`, { width: state.size.x, height: state.size.y, depth: 1.48 }, this.scene);
       cage.parent = root;
       cage.material = material;
-      cage.visibility = 0.38;
+      cage.visibility = 0.64;
       cage.enableEdgesRendering();
       cage.edgesWidth = 2;
       cage.edgesColor = new Color4(0.93, 0.68, 0.24, 0.8);
@@ -527,8 +605,11 @@ export class SceneWorld {
       mesh.parent = root;
       mesh.material = material;
       mesh.enableEdgesRendering();
-      mesh.edgesWidth = 0.45;
-      mesh.edgesColor = new Color4(0.03, 0.06, 0.06, state.material === "glass" ? 0.25 : 0.72);
+      mesh.edgesWidth = state.material === "glass" || state.material === "ice" ? 1.3 : 0.9;
+      mesh.edgesColor = state.owner === 0
+        ? new Color4(0.3, 0.78, 0.7, 0.78)
+        : new Color4(0.92, 0.49, 0.31, 0.78);
+      this.glow.addExcludedMesh(mesh);
       meshes.push(mesh);
     }
     for (const mesh of meshes) {
@@ -698,6 +779,13 @@ export class SceneWorld {
   }
 
   private updateVisuals(delta: number): void {
+    for (const [player, visual] of this.launchers) {
+      const active = player === this.activeLauncher;
+      const pulse = active ? 1 + Math.sin(this.elapsed * 5.4) * 0.13 : 1;
+      visual.marker.scaling.setAll(pulse);
+      visual.ring.scaling.setAll(pulse);
+      visual.pointer.position.y = LAUNCH_CONFIG.height + 1.05 + (active ? Math.sin(this.elapsed * 4.2) * 0.1 : 0);
+    }
     for (const [id, visual] of this.blocks) {
       if (id.includes("core")) {
         const crystal = visual.meshes[1];

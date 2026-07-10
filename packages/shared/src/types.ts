@@ -6,6 +6,21 @@ export type ElementId = "fire" | "water" | "ice" | "acid" | "lightning";
 export type ModifierId = "heavy" | "split" | "sticky";
 export type MutationId = "reinforce" | "wet" | "frozen" | "oiled";
 
+export interface LaunchConfig {
+  positions: [number, number];
+  height: number;
+  minAngle: number;
+  maxAngle: number;
+  minPower: number;
+  maxPower: number;
+  recommendedAngle: number;
+  recommendedPower: number;
+  baseSpeed: number;
+  powerSpeed: number;
+  maxFlightSeconds: number;
+  postImpactSeconds: number;
+}
+
 export interface MaterialDef {
   id: MaterialId;
   displayName: string;
@@ -137,4 +152,3 @@ export interface ReplayData {
   labMode: boolean;
   commands: LoggedCommand[];
 }
-
