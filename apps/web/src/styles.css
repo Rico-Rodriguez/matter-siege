@@ -17,12 +17,12 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #game-shell { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-body { background: #05090a; user-select: none; }
+html, body, #game-shell { width: 100%; height: 100%; min-height: 100%; margin: 0; overflow: hidden; }
+body { background: #05090a; user-select: none; overscroll-behavior: none; }
 button { color: inherit; font: inherit; }
 button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 3px; }
 
-#game-shell { position: relative; isolation: isolate; min-width: 960px; }
+#game-shell { position: relative; isolation: isolate; width: 100vw; height: 100dvh; min-width: 0; }
 #renderCanvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; outline: none; }
 .vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 50% 48%, transparent 35%, rgba(1, 5, 6, .28) 72%, rgba(1, 4, 5, .88) 120%); z-index: 2; }
 .film-grain { position: absolute; inset: -30%; pointer-events: none; z-index: 3; opacity: .08; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.8'/%3E%3C/svg%3E"); animation: grain .28s steps(2) infinite; }
@@ -141,4 +141,189 @@ body[data-phase="aim"] .aim-prompt { transform: translate(-50%, 0); opacity: 1; 
 
 @media (max-height: 760px) {
   .topbar { height: 58px; }.core-meter { top: 70px; }.phase-card { top: 127px; transform: scale(.9); transform-origin: top left; }.event-feed { top: 126px; }.footer-telemetry { height: 23px; }.aim-prompt { bottom: 34px; }.recipe-chip { bottom: 32px; }
+}
+
+@media (max-width: 1100px) {
+  .topbar {
+    grid-template-columns: minmax(170px, .85fr) auto minmax(150px, .8fr) auto;
+    column-gap: 16px;
+    padding-inline: 16px;
+  }
+  .brand-lockup { gap: 9px; }
+  .brand-lockup small, .network-status { display: none; }
+  .mode { padding-inline: 11px; }
+  .core-left { left: 16px; }
+  .core-right { right: 16px; }
+  .phase-card { left: 16px; }
+  .event-feed, .recipe-chip { right: 16px; }
+  .footer-telemetry { gap: 16px; padding-inline: 16px; }
+}
+
+@media (max-width: 760px), (max-width: 1000px) and (max-height: 560px) {
+  :root {
+    --mobile-gutter-left: max(8px, env(safe-area-inset-left));
+    --mobile-gutter-right: max(8px, env(safe-area-inset-right));
+  }
+
+  .film-grain { opacity: .055; }
+  .vignette { background: radial-gradient(circle at 50% 44%, transparent 28%, rgba(1, 5, 6, .22) 70%, rgba(1, 4, 5, .82) 125%); }
+
+  .splash { padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom)); text-align: center; }
+  .splash-rule { width: min(440px, calc(100vw - 40px)); gap: 10px; font-size: 8px; letter-spacing: .25em; }
+  .splash-title { margin: 20px 0 12px; }
+  .title-matter { max-width: 100%; font-size: clamp(40px, 16vw, 92px); letter-spacing: .05em; }
+  .title-siege { margin-top: 14px; font-size: clamp(11px, 3.5vw, 18px); letter-spacing: 1.05em; transform: translateX(.52em); }
+  .splash-deck { max-width: 32rem; margin: 16px 0 28px; font-size: clamp(10px, 3vw, 13px); line-height: 1.55; }
+  .enter-button { width: min(270px, calc(100vw - 48px)); min-height: 48px; }
+  .splash-footer { bottom: max(14px, env(safe-area-inset-bottom)); max-width: calc(100vw - 28px); justify-content: center; gap: 8px; font-size: 6px; letter-spacing: .08em; }
+
+  .topbar {
+    height: calc(54px + env(safe-area-inset-top));
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 8px;
+    padding: env(safe-area-inset-top) var(--mobile-gutter-right) 0 var(--mobile-gutter-left);
+  }
+  .brand-lockup { display: none; }
+  .mode-switch { min-width: 0; justify-self: stretch; }
+  .mode { flex: 1 1 0; min-width: 0; height: 36px; padding: 0 7px; font-size: 7px; letter-spacing: .06em; }
+  .online-dot { width: 4px; height: 4px; margin-right: 3px; }
+  .phase-readout { column-gap: 7px; }
+  .phase-readout small { margin-bottom: 2px; font-size: 6px; letter-spacing: .1em; }
+  .phase-readout strong { font-size: 13px; letter-spacing: .08em; }
+  .phase-readout span { font-size: 7px; }
+  .system-controls { gap: 0; }
+  .network-status { display: none; }
+  .icon-button { min-width: 38px; min-height: 36px; padding: 6px; overflow: hidden; font-size: 0; }
+  .icon-button::after { content: "SND"; font: 7px "DM Mono", monospace; letter-spacing: .05em; }
+
+  .core-meter { top: calc(64px + env(safe-area-inset-top)); width: calc(50% - 14px); }
+  .core-left { left: var(--mobile-gutter-left); }
+  .core-right { right: var(--mobile-gutter-right); }
+  .core-heading span { max-width: calc(100% - 38px); overflow: hidden; font-size: 6px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+  .core-heading strong { font-size: 18px; }
+  .meter-track { margin: 4px 0; }
+  .core-meter > small { font-size: 5px; letter-spacing: .06em; }
+
+  .phase-card {
+    inset: auto var(--mobile-gutter-right) calc(23px + env(safe-area-inset-bottom)) var(--mobile-gutter-left);
+    width: auto;
+    max-height: min(48dvh, 390px);
+    padding: 13px 14px 12px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    transform: none;
+    transform-origin: center bottom;
+    background: linear-gradient(145deg, rgba(7, 18, 19, .94), rgba(6, 14, 16, .86));
+  }
+  .card-index { right: 12px; top: 8px; font-size: 31px; }
+  .phase-copy { padding-right: 32px; }
+  .phase-copy > small { font-size: 7px; }
+  .phase-copy h2 { margin: 5px 0; font-size: 18px; }
+  .phase-copy p { min-height: 0; margin: 0 0 10px; font-size: 9px; line-height: 1.45; }
+  .treatment { min-height: 43px; }
+  .choice { min-height: 36px; }
+  .primary-action { min-height: 42px; margin-top: 10px; }
+  .quick-launch { min-height: 36px; }
+  body[data-phase="resolve"] .phase-card { opacity: 0; transform: translateY(20px); }
+
+  .aim-prompt { top: calc(112px + env(safe-area-inset-top)); bottom: auto; width: min(360px, calc(100vw - 24px)); gap: 9px; padding: 8px 10px; transform: translate(-50%, -8px); }
+  body[data-phase="aim"] .aim-prompt { transform: translate(-50%, 0); }
+  .mouse-glyph { flex: 0 0 20px; width: 20px; height: 27px; padding: 4px 8px; }
+  .aim-prompt strong { font-size: 7px; }
+  .aim-prompt small { max-width: 210px; font-size: 7px; line-height: 1.35; }
+  .aim-numbers { min-width: 42px; padding-left: 8px; }
+  .aim-numbers b { font-size: 13px; }
+
+  .recipe-chip { top: calc(113px + env(safe-area-inset-top)); right: var(--mobile-gutter-right); bottom: auto; width: 42px; height: 42px; padding: 5px; border: 1px solid rgba(201, 162, 94, .28); background: rgba(8, 17, 18, .72); }
+  .recipe-chip > span { width: 30px; height: 30px; }
+  .recipe-chip > div { display: none; }
+  body[data-phase="aim"] .recipe-chip { display: none; }
+
+  .enemy-banner { top: calc(112px + env(safe-area-inset-top)); gap: 8px; font-size: 6px; white-space: nowrap; }
+  .enemy-banner span { width: 18px; }
+  .event-feed { top: calc(160px + env(safe-area-inset-top)); right: var(--mobile-gutter-right); width: 145px; font-size: 6px; }
+  .event-line:nth-child(n + 4) { display: none; }
+  .toast { top: calc(116px + env(safe-area-inset-top)); min-width: 0; width: min(310px, calc(100vw - 32px)); }
+  .win-panel { width: min(390px, calc(100vw - 24px)); padding: 24px 18px; }
+  .win-panel h2 { font-size: 26px; }
+
+  .footer-telemetry { height: calc(23px + env(safe-area-inset-bottom)); gap: 10px; padding: 0 var(--mobile-gutter-right) env(safe-area-inset-bottom) var(--mobile-gutter-left); overflow: hidden; font-size: 6px; white-space: nowrap; }
+  .footer-telemetry .legend { display: none; }
+}
+
+@media (max-width: 430px) {
+  .mode { padding-inline: 5px; }
+  .phase-readout small { max-width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .phase-copy p { display: none; }
+  .build-tools { gap: 5px; }
+  .treatment { gap: 6px; padding: 5px; }
+  .treatment-icon { flex-basis: 26px; height: 26px; }
+  .forge-tools { gap: 9px; }
+  .choice-list { gap: 4px; }
+  .footer-telemetry span:nth-child(2) { display: none; }
+}
+
+@media (max-width: 1000px) and (max-height: 560px) and (orientation: landscape) {
+  .topbar { height: calc(48px + env(safe-area-inset-top)); }
+  .mode { height: 32px; }
+  .icon-button { min-height: 32px; }
+  .core-meter { top: calc(54px + env(safe-area-inset-top)); }
+  .core-meter > small { display: none; }
+
+  .phase-card {
+    left: 50%;
+    right: auto;
+    bottom: calc(21px + env(safe-area-inset-bottom));
+    width: min(720px, calc(100vw - 16px));
+    max-height: 142px;
+    display: grid;
+    grid-template-columns: .7fr 2fr .75fr;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 11px;
+    overflow: auto;
+    transform: translateX(-50%);
+  }
+  .card-index { display: none; }
+  .phase-copy { padding: 0; }
+  .phase-copy > small { font-size: 6px; }
+  .phase-copy h2 { margin: 4px 0 0; font-size: 15px; }
+  .phase-copy p { display: none; }
+  .build-tools { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+  .treatment { min-height: 40px; gap: 5px; padding: 4px; }
+  .treatment-icon { flex-basis: 24px; height: 24px; font-size: 13px; }
+  .treatment b { font-size: 7px; }
+  .treatment small { display: none; }
+  .action-pips { grid-column: 1 / 5; padding-top: 0; }
+  .forge-tools { grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .forge-column label { margin-bottom: 4px; }
+  .choice { min-height: 30px; }
+  .primary-action { min-height: 38px; height: 38px; margin: 0; }
+  .quick-launch { min-height: 28px; padding: 4px; }
+  body[data-phase="resolve"] .phase-card { transform: translate(-50%, 18px); }
+
+  .aim-prompt { top: calc(94px + env(safe-area-inset-top)); width: min(360px, calc(100vw - 24px)); }
+  .recipe-chip { top: calc(94px + env(safe-area-inset-top)); }
+  .event-feed { top: calc(102px + env(safe-area-inset-top)); }
+  .enemy-banner { top: calc(92px + env(safe-area-inset-top)); }
+  .footer-telemetry { height: calc(21px + env(safe-area-inset-bottom)); }
+}
+
+@media (max-width: 600px) and (max-height: 560px) and (orientation: landscape) {
+  .phase-card { grid-template-columns: .55fr 2fr .7fr; }
+  .build-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .action-pips { grid-column: 1 / 3; }
+  .treatment { min-height: 34px; }
+  .treatment-icon { flex-basis: 18px; height: 18px; font-size: 11px; }
+  .primary-action { padding-inline: 7px; font-size: 6px; letter-spacing: .08em; }
+}
+
+@media (pointer: coarse) {
+  .mode, .icon-button, .treatment, .choice, .primary-action, .quick-launch, .win-panel button { touch-action: manipulation; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .film-grain { animation: none; }
+  .hud, .splash, .phase-card, .aim-prompt, .enemy-banner, .toast, .win-panel { transition-duration: .01ms; }
 }

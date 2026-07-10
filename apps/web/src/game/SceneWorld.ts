@@ -87,6 +87,9 @@ export class SceneWorld {
   private shake = 0;
   private elapsed = 0;
 
+  private static readonly DESKTOP_ASPECT = 16 / 9;
+  private static readonly DESKTOP_VERTICAL_FOV = 0.56;
+
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
   async initialize(): Promise<void> {
@@ -116,7 +119,7 @@ export class SceneWorld {
 
     this.camera = new FreeCamera("sideView", this.cameraBase.clone(), this.scene);
     this.camera.setTarget(this.cameraTarget);
-    this.camera.fov = 0.56;
+    this.updateViewport();
     this.camera.minZ = 0.1;
     this.camera.maxZ = 120;
 
@@ -135,7 +138,21 @@ export class SceneWorld {
       this.updateVisuals(delta);
       this.scene.render();
     });
-    window.addEventListener("resize", () => this.engine.resize());
+    const resize = (): void => this.updateViewport();
+    window.addEventListener("resize", resize);
+    window.visualViewport?.addEventListener("resize", resize);
+    new ResizeObserver(resize).observe(this.canvas);
+  }
+
+  private updateViewport(): void {
+    this.engine.resize();
+    const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
+    const aspect = width / height;
+    const desktopHalfHorizontalFov = Math.tan(SceneWorld.DESKTOP_VERTICAL_FOV / 2) * SceneWorld.DESKTOP_ASPECT;
+    this.camera.fov = aspect >= SceneWorld.DESKTOP_ASPECT
+      ? SceneWorld.DESKTOP_VERTICAL_FOV
+      : 2 * Math.atan(desktopHalfHorizontalFov / aspect);
   }
 
   setFrameCallback(callback: (deltaSeconds: number) => void): void {
